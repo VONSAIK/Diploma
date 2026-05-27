@@ -7,8 +7,8 @@ import { forecastApi, ForecastResponse } from '../services/api'
 import { useAsync } from '../hooks/useAsync'
 import Card from '../components/ui/Card'
 import Spinner from '../components/ui/Spinner'
+import AssetSelector from '../components/ui/AssetSelector'
 
-const POPULAR = ['AAPL', 'GOOGL', 'MSFT', 'TSLA', 'AMZN', 'NVDA']
 const DAILY_STEPS  = [7, 14, 30, 60, 90]
 const HOURLY_STEPS = [12, 24, 48]
 
@@ -75,15 +75,7 @@ export default function ForecastPage() {
       <Card>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="flex flex-wrap gap-3 items-end">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Тікер</label>
-              <input
-                value={ticker}
-                onChange={e => setTicker(e.target.value.toUpperCase())}
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm w-24 focus:outline-none focus:border-blue-500"
-                placeholder="AAPL"
-              />
-            </div>
+            <AssetSelector value={ticker} onChange={setTicker} />
 
             <div>
               <label className="block text-xs text-gray-400 mb-1">Інтервал</label>
@@ -123,14 +115,6 @@ export default function ForecastPage() {
             </button>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {POPULAR.map(t => (
-              <button key={t} type="button" onClick={() => setTicker(t)}
-                className={`text-xs px-2 py-1 rounded-md border transition-colors ${ticker === t ? 'border-blue-500 text-blue-400 bg-blue-950/40' : 'border-gray-700 text-gray-500 hover:border-gray-500'}`}>
-                {t}
-              </button>
-            ))}
-          </div>
 
           {/* Пояснення поточної моделі */}
           <div className="bg-gray-800/50 border border-gray-700 rounded-lg px-4 py-3">

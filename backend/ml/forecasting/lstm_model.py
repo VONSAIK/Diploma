@@ -51,26 +51,42 @@ class LSTMForecaster:
 
     def predict(self, df: pd.DataFrame, days: int = 30) -> dict:
         prices = df["close"].values
+        last_actual_price = float(prices[-1])
+
         self._train(prices)
 
         scaled = self.scaler.transform(prices.reshape(-1, 1))
-        seq = scaled[-self.seq_len :].tolist()
+        seq = scaled[-self.seq_len:].tolist()
 
         self.model.eval()
-        predictions = []
-        last_date = df.index[-1]
+        raw_predictions = []
 
         with torch.no_grad():
-            for i in range(days):
-                x = torch.FloatTensor([seq[-self.seq_len :]]).to(self.device)
+            for _ in range(days):
+                x = torch.FloatTensor([seq[-self.seq_len:]]).to(self.device)
                 pred = self.model(x).cpu().numpy()[0][0]
                 seq.append([pred])
-
                 price = float(self.scaler.inverse_transform([[pred]])[0][0])
-                date = last_date + pd.Timedelta(days=i + 1)
-                # пропустити вихідні
-                while date.weekday() >= 5:
-                    date += pd.Timedelta(days=1)
-                predictions.append({"date": date.strftime("%Y-%m-%d"), "price": round(price, 2)})
+                raw_predictions.append(price)
+
+        # Фіксуємо старт прогнозу до реальної останньої ціни
+        # і обмежуємо максимальний дрейф ±1.5% на день
+        predictions = []
+        current_date = df.index[-1]
+        prev_price = last_actual_price
+        offset = raw_predictions[0] - last_actual_price  # корекція зсуву
+
+        for i, raw_price in enumerate(raw_predictions):
+            current_date += pd.Timedelta(days=1)
+            while current_date.weekday() >= 5:
+                current_date += pd.Timedelta(days=1)
+
+            corrected = raw_price - offset
+            max_change = prev_price * 0.015  # ±1.5% на день максимум
+            price = float(np.clip(corrected, prev_price - max_change, prev_price + max_change))
+            price = round(max(price, 0.01), 2)
+            prev_price = price
+
+            predictions.append({"date": current_date.strftime("%Y-%m-%d"), "price": price})
 
         return {"predictions": predictions}

@@ -4,6 +4,7 @@ import { useAsync } from '../hooks/useAsync'
 import Card from '../components/ui/Card'
 import Badge from '../components/ui/Badge'
 import Spinner from '../components/ui/Spinner'
+import AssetSelector from '../components/ui/AssetSelector'
 
 const SIGNALS = {
   positive: { label: 'Позитивний', color: 'text-green-400', bar: 'bg-green-500' },
@@ -30,14 +31,7 @@ export default function SentimentPage() {
 
       <Card>
         <form onSubmit={handleSubmit} className="flex flex-wrap gap-3 items-end">
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Тікер</label>
-            <input
-              value={ticker}
-              onChange={e => setTicker(e.target.value.toUpperCase())}
-              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm w-28 focus:outline-none focus:border-blue-500"
-            />
-          </div>
+          <AssetSelector value={ticker} onChange={setTicker} />
           <div>
             <label className="block text-xs text-gray-400 mb-1">За останні</label>
             <select
