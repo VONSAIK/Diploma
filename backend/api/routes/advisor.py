@@ -158,22 +158,52 @@ def _format_dict(d: dict) -> str:
     return ", ".join(f"{k}: {v}" for k, v in d.items())
 
 
+def _strip_md(text: str) -> str:
+    """Видаляє markdown форматування з тексту."""
+    import re
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)   # **bold**
+    text = re.sub(r'\*(.+?)\*', r'\1', text)         # *italic*
+    text = re.sub(r'#{1,3}\s*', '', text)             # ## заголовки
+    return text.strip()
+
+
 def _parse_response(text: str, model: str) -> AdvisorResponse:
+    import re
+    clean = _strip_md(text)
     recommendation, insights, risks = "", [], []
     section = None
-    for line in text.splitlines():
+
+    for line in clean.splitlines():
         line = line.strip()
-        if line.startswith("РЕКОМЕНДАЦІЯ:"):
-            recommendation = line.replace("РЕКОМЕНДАЦІЯ:", "").strip()
-        elif line.startswith("ІНСАЙТИ:"):
+        if not line:
+            continue
+        if re.search(r'РЕКОМЕНДАЦ[ІI]Я\s*:', line, re.IGNORECASE):
+            recommendation = re.sub(r'РЕКОМЕНДАЦ[ІI]Я\s*:', '', line, flags=re.IGNORECASE).strip()
+            section = None
+        elif re.search(r'[ІI]НСАЙТИ\s*:', line, re.IGNORECASE):
             section = "insights"
-        elif line.startswith("РИЗИКИ:"):
+        elif re.search(r'РИЗИКИ\s*:', line, re.IGNORECASE):
             section = "risks"
-        elif line.startswith("- "):
-            (insights if section == "insights" else risks).append(line[2:].strip())
+        elif line.startswith(('- ', '• ', '* ')):
+            item = line[2:].strip()
+            if section == "insights":
+                insights.append(item)
+            elif section == "risks":
+                risks.append(item)
+        elif section == "insights" and line and not line.endswith(':'):
+            insights.append(line)
+        elif section == "risks" and line and not line.endswith(':'):
+            risks.append(line)
+
+    # Fallback — якщо парсинг не спрацював, беремо весь текст як рекомендацію
+    if not recommendation:
+        # Перший абзац як рекомендація
+        paragraphs = [p.strip() for p in clean.split('\n\n') if p.strip()]
+        recommendation = paragraphs[0] if paragraphs else clean[:500]
+
     return AdvisorResponse(
-        recommendation=recommendation or text[:300],
-        key_insights=insights,
-        risks=risks,
+        recommendation=recommendation,
+        key_insights=insights[:5],
+        risks=risks[:5],
         model=model,
     )

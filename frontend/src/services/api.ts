@@ -16,6 +16,8 @@ export interface ConfidencePoint {
 export interface ForecastResponse {
   ticker: string
   model: string
+  interval: string
+  history: ForecastPoint[]
   predictions: ForecastPoint[]
   confidence_interval: ConfidencePoint[] | null
   metrics: { cv_mape?: number; feature_importance?: Record<string, number> } | null
