@@ -119,30 +119,45 @@ class XGBoostForecaster:
         df_feat = add_technical_indicators(df)
         features = [c for c in FEATURE_COLS if c in df_feat.columns]
 
-        last_features = df_feat[features].values[-1].reshape(1, -1)
-        last_scaled = self.scaler.transform(last_features)
+        # Індекси ознак для динамічного оновлення між кроками
+        feat_idx = {f: i for i, f in enumerate(features)}
+
+        last_row = df_feat[features].values[-1].copy()
+        prev_prices = df_feat["close"].values[-10:].tolist()  # останні 10 цін для rolling
 
         predictions = []
         current_date = df.index[-1]
-        current_price = float(df["close"].iloc[-1])
 
         for i in range(days):
             current_date += pd.Timedelta(days=1)
             while current_date.weekday() >= 5:
                 current_date += pd.Timedelta(days=1)
 
-            pred_price = float(self.model.predict(last_scaled)[0])
-            # Обмежуємо дрейф ±3% на день
-            pred_price = np.clip(
-                pred_price,
-                current_price * (1 - 0.03 * (i + 1)),
-                current_price * (1 + 0.03 * (i + 1)),
-            )
+            x_scaled = self.scaler.transform(last_row.reshape(1, -1))
+            pred_price = float(self.model.predict(x_scaled)[0])
+            pred_price = max(pred_price, 0.01)
 
             predictions.append({
                 "date": current_date.strftime("%Y-%m-%d"),
                 "price": round(pred_price, 2),
             })
+
+            # Оновлюємо price-based ознаки для наступного кроку
+            prev_prices.append(pred_price)
+            prev_price = prev_prices[-2]
+
+            if "returns_1d" in feat_idx:
+                last_row[feat_idx["returns_1d"]] = (pred_price - prev_price) / prev_price
+            if "returns_5d" in feat_idx and len(prev_prices) >= 6:
+                last_row[feat_idx["returns_5d"]] = (pred_price - prev_prices[-6]) / prev_prices[-6]
+            if "returns_10d" in feat_idx and len(prev_prices) >= 11:
+                last_row[feat_idx["returns_10d"]] = (pred_price - prev_prices[-11]) / prev_prices[-11]
+            if "close" in feat_idx:
+                last_row[feat_idx["close"]] = pred_price
+            # SMA20 approx — sliding window
+            if "price_vs_sma20" in feat_idx and len(prev_prices) >= 20:
+                sma20 = np.mean(prev_prices[-20:])
+                last_row[feat_idx["price_vs_sma20"]] = (pred_price - sma20) / sma20
 
         return {
             "predictions": predictions,

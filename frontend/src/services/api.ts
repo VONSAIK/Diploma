@@ -72,8 +72,8 @@ export interface AdvisorResponse {
 }
 
 export const forecastApi = {
-  get: (ticker: string, days: number, model: string) =>
-    api.get<ForecastResponse>(`/forecast/${ticker}`, { params: { days, model } }),
+  get: (ticker: string, steps: number, model: string, interval: string = '1d') =>
+    api.get<ForecastResponse>(`/forecast/${ticker}`, { params: { steps, model, interval } }),
 }
 
 export const portfolioApi = {

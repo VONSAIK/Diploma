@@ -2,12 +2,14 @@ import pandas as pd
 import yfinance as yf
 
 
-def get_stock_data(ticker: str, period: str = "1y") -> pd.DataFrame:
-    """Завантажує OHLCV дані для тікера."""
-    df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
+def get_stock_data(ticker: str, period: str = "1y", interval: str = "1d") -> pd.DataFrame:
+    """Завантажує OHLCV дані для тікера.
+    interval: '1d' (денний), '1h' (погодинний), '5m', '15m', '30m'
+    Погодинні дані доступні за останні 60 днів, хвилинні — 7 днів.
+    """
+    df = yf.download(ticker, period=period, interval=interval, auto_adjust=True, progress=False)
     if df.empty:
         raise ValueError(f"Немає даних для {ticker}")
-    # yfinance 1.4+ повертає MultiIndex колонки — спрощуємо
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     df.columns = df.columns.str.lower()

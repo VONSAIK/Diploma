@@ -39,7 +39,7 @@ async def _gemini_recommend(request: AdvisorRequest) -> AdvisorResponse:
     prompt = _build_prompt(request)
 
     response = client.models.generate_content(
-        model="gemini-1.5-flash",
+        model="gemini-2.5-flash",
         contents=prompt,
         config={
             "system_instruction": (
@@ -50,7 +50,7 @@ async def _gemini_recommend(request: AdvisorRequest) -> AdvisorResponse:
             "temperature": 0.7,
         },
     )
-    return _parse_response(response.text or "", "gemini-1.5-flash")
+    return _parse_response(response.text or "", "gemini-2.5-flash")
 
 
 def _rule_based_recommend(request: AdvisorRequest) -> AdvisorResponse:

@@ -132,7 +132,15 @@ export default function AdvisorPage() {
             </Card>
           )}
 
-          <p className="text-xs text-gray-600 text-right">Powered by {data.model}</p>
+          <div className="flex justify-end">
+            <span className={`text-xs px-2 py-1 rounded-md border ${
+              data.model.includes('gemini')
+                ? 'border-blue-700 text-blue-400 bg-blue-950/30'
+                : 'border-gray-700 text-gray-500'
+            }`}>
+              {data.model.includes('gemini') ? '✦ Powered by Gemini 2.5 Flash' : 'rule-based аналіз'}
+            </span>
+          </div>
         </div>
       )}
     </div>
