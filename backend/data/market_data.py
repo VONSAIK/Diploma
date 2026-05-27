@@ -1,22 +1,18 @@
-from datetime import datetime, timedelta
-
 import pandas as pd
 import yfinance as yf
 
 
 def get_stock_data(ticker: str, period: str = "1y") -> pd.DataFrame:
     """Завантажує OHLCV дані для тікера."""
-    stock = yf.Ticker(ticker)
-    df = stock.history(period=period)
-    df.index = pd.to_datetime(df.index)
-    df = df[["Open", "High", "Low", "Close", "Volume"]]
+    df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
+    if df.empty:
+        raise ValueError(f"Немає даних для {ticker}")
+    # yfinance 1.4+ повертає MultiIndex колонки — спрощуємо
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
     df.columns = df.columns.str.lower()
-    return df
-
-
-def get_multiple_stocks(tickers: list[str], period: str = "1y") -> dict[str, pd.DataFrame]:
-    """Завантажує дані для кількох тікерів."""
-    return {ticker: get_stock_data(ticker, period) for ticker in tickers}
+    df.index = pd.to_datetime(df.index).tz_localize(None)
+    return df[["open", "high", "low", "close", "volume"]]
 
 
 def get_stock_info(ticker: str) -> dict:
@@ -36,5 +32,8 @@ def get_stock_info(ticker: str) -> dict:
 
 def get_closing_prices(tickers: list[str], period: str = "1y") -> pd.DataFrame:
     """Матриця цін закриття для оптимізації портфеля."""
-    data = yf.download(tickers, period=period, auto_adjust=True)["Close"]
-    return data.dropna()
+    df = yf.download(tickers, period=period, auto_adjust=True, progress=False)["Close"]
+    if isinstance(df, pd.Series):
+        df = df.to_frame(name=tickers[0])
+    df.index = pd.to_datetime(df.index).tz_localize(None)
+    return df.dropna()

@@ -18,6 +18,7 @@ export interface ForecastResponse {
   model: string
   predictions: ForecastPoint[]
   confidence_interval: ConfidencePoint[] | null
+  metrics: { cv_mape?: number; feature_importance?: Record<string, number> } | null
 }
 
 export interface PortfolioRequest {

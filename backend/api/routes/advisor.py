@@ -1,6 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
-import anthropic
 
 from core.config import settings
 
@@ -25,70 +24,142 @@ class AdvisorResponse(BaseModel):
 
 @router.post("/recommend", response_model=AdvisorResponse)
 async def get_recommendation(request: AdvisorRequest):
-    if not settings.anthropic_api_key:
-        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY не налаштовано")
+    if settings.gemini_api_key:
+        try:
+            return await _gemini_recommend(request)
+        except Exception:
+            pass
+    return _rule_based_recommend(request)
 
+
+async def _gemini_recommend(request: AdvisorRequest) -> AdvisorResponse:
+    from google import genai
+
+    client = genai.Client(api_key=settings.gemini_api_key)
     prompt = _build_prompt(request)
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        system=(
-            "Ти — AI-помічник з інвестицій. Аналізуй дані портфеля та надавай "
-            "конкретні, обґрунтовані рекомендації. Відповідай українською мовою. "
-            "Будь конкретним і чітким. Не давай фінансових порад, що вимагають ліцензії."
-        ),
-        messages=[{"role": "user", "content": prompt}],
+    response = client.models.generate_content(
+        model="gemini-1.5-flash",
+        contents=prompt,
+        config={
+            "system_instruction": (
+                "Ти — AI-помічник з інвестицій. Аналізуй дані портфеля та надавай "
+                "конкретні, обґрунтовані рекомендації. Відповідай українською мовою."
+            ),
+            "max_output_tokens": 1024,
+            "temperature": 0.7,
+        },
     )
+    return _parse_response(response.text or "", "gemini-1.5-flash")
 
-    raw = message.content[0].text
-    return _parse_response(raw, message.model)
+
+def _rule_based_recommend(request: AdvisorRequest) -> AdvisorResponse:
+    """Аналітичний fallback без зовнішнього API."""
+    insights = []
+    risks = []
+    portfolio = request.portfolio
+    metrics = request.portfolio_metrics
+    risk = request.risk_tolerance
+
+    # Диверсифікація
+    n = len(portfolio)
+    max_weight = max(portfolio.values()) if portfolio else 0
+    if n < 3:
+        risks.append(f"Низька диверсифікація: лише {n} активів у портфелі")
+    elif n >= 5:
+        insights.append(f"Хороша диверсифікація: {n} активів")
+
+    if max_weight > 0.5:
+        heavy = max(portfolio, key=portfolio.get)
+        risks.append(f"Концентрація в {heavy}: {max_weight*100:.0f}% портфеля — рекомендовано ≤50%")
+
+    # Метрики
+    if metrics:
+        ret = metrics.get("expected_annual_return", 0)
+        vol = metrics.get("annual_volatility", 0)
+        sharpe = metrics.get("sharpe_ratio", 0)
+
+        if ret > 0.15:
+            insights.append(f"Висока очікувана дохідність: {ret*100:.1f}% річних")
+        elif ret > 0:
+            insights.append(f"Помірна очікувана дохідність: {ret*100:.1f}% річних")
+
+        if sharpe > 2.0:
+            insights.append(f"Відмінний Sharpe Ratio: {sharpe:.2f} — ефективне співвідношення дохід/ризик")
+        elif sharpe < 0.5:
+            risks.append(f"Низький Sharpe Ratio: {sharpe:.2f} — портфель не компенсує ризик")
+
+        if risk == "low" and vol > 0.20:
+            risks.append(f"Волатильність {vol*100:.1f}% висока для консервативного профілю")
+
+    # Sentiment
+    for ticker, signal in request.sentiment_signals.items():
+        if signal == "negative":
+            risks.append(f"Негативний новинний фон по {ticker}")
+        elif signal == "positive":
+            insights.append(f"Позитивний сентимент новин по {ticker}")
+
+    # Forecast
+    for ticker, change_pct in request.forecast_signals.items():
+        if change_pct > 5:
+            insights.append(f"{ticker}: прогноз зростання +{change_pct:.1f}% за 30 днів")
+        elif change_pct < -5:
+            risks.append(f"{ticker}: прогноз падіння {change_pct:.1f}% за 30 днів")
+
+    # Рекомендація
+    n_risks = len(risks)
+    if n_risks == 0:
+        rec = "Портфель виглядає збалансовано. Продовжуйте поточну стратегію та переглядайте склад щоквартально."
+    elif n_risks <= 2:
+        rec = "Портфель потребує незначного коригування. Зверніть увагу на виявлені ризики."
+    else:
+        rec = "Виявлено кілька зон ризику. Рекомендується перебалансування портфеля відповідно до вашого профілю."
+
+    if not insights:
+        insights.append("Регулярно переглядайте склад портфеля (раз на квартал)")
+    if not risks:
+        risks.append("Ринковий ризик завжди присутній — тримайте 3-6 місяців витрат у готівці")
+
+    return AdvisorResponse(
+        recommendation=rec,
+        key_insights=insights,
+        risks=risks,
+        model="rule-based",
+    )
 
 
 def _build_prompt(req: AdvisorRequest) -> str:
     parts = [
         f"Профіль ризику: {req.risk_tolerance}",
-        f"\nПоточний портфель (тікер -> вага):\n{_format_dict(req.portfolio)}",
+        f"\nПортфель:\n{_format_dict(req.portfolio)}",
     ]
-
     if req.portfolio_metrics:
         m = req.portfolio_metrics
         parts.append(
-            f"\nМетрики портфеля:\n"
-            f"- Очікувана річна дохідність: {m.get('expected_annual_return', 'N/A')}\n"
-            f"- Волатильність: {m.get('annual_volatility', 'N/A')}\n"
-            f"- Коефіцієнт Шарпа: {m.get('sharpe_ratio', 'N/A')}"
+            f"\nМетрики: дохідність={m.get('expected_annual_return','N/A')}, "
+            f"волатильність={m.get('annual_volatility','N/A')}, "
+            f"Sharpe={m.get('sharpe_ratio','N/A')}"
         )
-
     if req.sentiment_signals:
-        parts.append(f"\nСентимент новин:\n{_format_dict(req.sentiment_signals)}")
-
+        parts.append(f"\nСентимент: {_format_dict(req.sentiment_signals)}")
     if req.forecast_signals:
-        parts.append(f"\nПрогнозована зміна ціни (30 днів, %):\n{_format_dict(req.forecast_signals)}")
-
+        parts.append(f"\nПрогноз зміни (%): {_format_dict(req.forecast_signals)}")
     if req.question:
-        parts.append(f"\nПитання від користувача: {req.question}")
-
+        parts.append(f"\nПитання: {req.question}")
     parts.append(
-        "\nНадай відповідь у форматі:\n"
-        "РЕКОМЕНДАЦІЯ: [загальний висновок]\n"
-        "ІНСАЙТИ:\n- [пункт 1]\n- [пункт 2]\n- [пункт 3]\n"
-        "РИЗИКИ:\n- [ризик 1]\n- [ризик 2]"
+        "\nФормат відповіді:\n"
+        "РЕКОМЕНДАЦІЯ: [висновок]\n"
+        "ІНСАЙТИ:\n- [пункт]\nРИЗИКИ:\n- [пункт]"
     )
-
     return "\n".join(parts)
 
 
 def _format_dict(d: dict) -> str:
-    return "\n".join(f"  {k}: {v}" for k, v in d.items())
+    return ", ".join(f"{k}: {v}" for k, v in d.items())
 
 
 def _parse_response(text: str, model: str) -> AdvisorResponse:
-    recommendation = ""
-    insights = []
-    risks = []
-
+    recommendation, insights, risks = "", [], []
     section = None
     for line in text.splitlines():
         line = line.strip()
@@ -99,12 +170,7 @@ def _parse_response(text: str, model: str) -> AdvisorResponse:
         elif line.startswith("РИЗИКИ:"):
             section = "risks"
         elif line.startswith("- "):
-            item = line[2:].strip()
-            if section == "insights":
-                insights.append(item)
-            elif section == "risks":
-                risks.append(item)
-
+            (insights if section == "insights" else risks).append(line[2:].strip())
     return AdvisorResponse(
         recommendation=recommendation or text[:300],
         key_insights=insights,
