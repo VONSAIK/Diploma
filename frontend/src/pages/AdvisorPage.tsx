@@ -33,7 +33,7 @@ export default function AdvisorPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">AI Радник</h1>
-        <p className="text-gray-400 text-sm mt-1">Персональні рекомендації на основі Claude AI</p>
+        <p className="text-gray-400 text-sm mt-1">Персональні рекомендації на основі Gemini AI</p>
       </div>
 
       <Card>
@@ -96,7 +96,7 @@ export default function AdvisorPage() {
       {loading && (
         <div className="space-y-3">
           <Spinner />
-          <p className="text-center text-gray-500 text-sm">Claude аналізує ваш портфель...</p>
+          <p className="text-center text-gray-500 text-sm">Gemini аналізує ваш портфель...</p>
         </div>
       )}
 
@@ -138,7 +138,7 @@ export default function AdvisorPage() {
                 ? 'border-blue-700 text-blue-400 bg-blue-950/30'
                 : 'border-gray-700 text-gray-500'
             }`}>
-              {data.model.includes('gemini') ? '✦ Powered by Gemini 2.5 Flash' : 'rule-based аналіз'}
+              {data.model.includes('gemini') ? `✦ Powered by ${data.model}` : 'rule-based аналіз'}
             </span>
           </div>
         </div>

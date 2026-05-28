@@ -27,8 +27,8 @@ async def get_recommendation(request: AdvisorRequest):
     if settings.gemini_api_key:
         try:
             return await _gemini_recommend(request)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Gemini error: {e}")
     return _rule_based_recommend(request)
 
 
@@ -36,140 +36,148 @@ async def _gemini_recommend(request: AdvisorRequest) -> AdvisorResponse:
     from google import genai
 
     client = genai.Client(api_key=settings.gemini_api_key)
-    prompt = _build_prompt(request)
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config={
-            "system_instruction": (
-                "Ти — AI-помічник з інвестицій. Аналізуй дані портфеля та надавай "
-                "конкретні, обґрунтовані рекомендації. Відповідай українською мовою."
-            ),
-            "max_output_tokens": 1024,
-            "temperature": 0.7,
-        },
-    )
-    return _parse_response(response.text or "", "gemini-2.5-flash")
+    portfolio_str = ", ".join(f"{k} ({v*100:.0f}%)" for k, v in request.portfolio.items())
+    risk_map = {"low": "консервативний", "medium": "збалансований", "high": "агресивний"}
+
+    prompt_parts = [
+        f"Ти — AI-помічник з інвестицій. Відповідай ТІЛЬКИ українською мовою.",
+        f"",
+        f"ДАНІ ПОРТФЕЛЯ:",
+        f"Склад: {portfolio_str}",
+        f"Ризик-профіль: {risk_map.get(request.risk_tolerance, request.risk_tolerance)}",
+    ]
+
+    if request.portfolio_metrics:
+        m = request.portfolio_metrics
+        prompt_parts += [
+            f"Очікувана річна дохідність: {float(m.get('expected_annual_return', 0))*100:.1f}%",
+            f"Волатильність: {float(m.get('annual_volatility', 0))*100:.1f}%",
+            f"Коефіцієнт Шарпа: {m.get('sharpe_ratio', 'N/A')}",
+        ]
+
+    if request.sentiment_signals:
+        sentiment_str = ", ".join(f"{k}: {v}" for k, v in request.sentiment_signals.items())
+        prompt_parts.append(f"Сентимент новин: {sentiment_str}")
+
+    if request.forecast_signals:
+        forecast_str = ", ".join(f"{k}: {v:+.1f}%" for k, v in request.forecast_signals.items())
+        prompt_parts.append(f"Прогноз зміни ціни: {forecast_str}")
+
+    if request.question:
+        prompt_parts += ["", f"Питання користувача: {request.question}"]
+
+    prompt_parts += [
+        "",
+        "Надай аналіз цього конкретного портфеля. Відповідай СТРОГО у такому форматі (без жодного markdown, без зірочок **):",
+        "",
+        "РЕКОМЕНДАЦІЯ: [один абзац з головним висновком]",
+        "ІНСАЙТИ:",
+        "- [конкретний інсайт про цей портфель]",
+        "- [конкретний інсайт]",
+        "- [конкретний інсайт]",
+        "РИЗИКИ:",
+        "- [конкретний ризик]",
+        "- [конкретний ризик]",
+    ]
+
+    prompt = "\n".join(prompt_parts)
+
+    # gemini-2.5-flash-lite — без thinking tokens, повна відповідь на free tier
+    for model_name in ["gemini-2.5-flash-lite", "gemini-2.5-flash"]:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config={"max_output_tokens": 1500, "temperature": 0.4},
+            )
+            raw = response.text or ""
+            if raw and len(raw) > 50:
+                return _parse_response(raw, model_name)
+        except Exception:
+            continue
+
+    raise RuntimeError("Gemini недоступний")
 
 
 def _rule_based_recommend(request: AdvisorRequest) -> AdvisorResponse:
-    """Аналітичний fallback без зовнішнього API."""
-    insights = []
-    risks = []
+    insights, risks = [], []
     portfolio = request.portfolio
     metrics = request.portfolio_metrics
     risk = request.risk_tolerance
 
-    # Диверсифікація
     n = len(portfolio)
     max_weight = max(portfolio.values()) if portfolio else 0
+    heavy_ticker = max(portfolio, key=portfolio.get) if portfolio else ""
+
     if n < 3:
-        risks.append(f"Низька диверсифікація: лише {n} активів у портфелі")
+        risks.append(f"Низька диверсифікація: лише {n} активів — рекомендовано мінімум 5")
     elif n >= 5:
-        insights.append(f"Хороша диверсифікація: {n} активів")
+        insights.append(f"Хороша диверсифікація: {n} активів у портфелі")
 
     if max_weight > 0.5:
-        heavy = max(portfolio, key=portfolio.get)
-        risks.append(f"Концентрація в {heavy}: {max_weight*100:.0f}% портфеля — рекомендовано ≤50%")
+        risks.append(f"Висока концентрація в {heavy_ticker}: {max_weight*100:.0f}% — рекомендовано ≤40%")
+    elif max_weight <= 0.3:
+        insights.append("Рівномірний розподіл ваг — мінімізує концентраційний ризик")
 
-    # Метрики
     if metrics:
-        ret = metrics.get("expected_annual_return", 0)
-        vol = metrics.get("annual_volatility", 0)
-        sharpe = metrics.get("sharpe_ratio", 0)
+        ret = float(metrics.get("expected_annual_return", 0))
+        vol = float(metrics.get("annual_volatility", 0))
+        sharpe = float(metrics.get("sharpe_ratio", 0))
 
-        if ret > 0.15:
+        if ret > 0.20:
             insights.append(f"Висока очікувана дохідність: {ret*100:.1f}% річних")
-        elif ret > 0:
-            insights.append(f"Помірна очікувана дохідність: {ret*100:.1f}% річних")
+        elif ret > 0.08:
+            insights.append(f"Помірна дохідність: {ret*100:.1f}% річних")
 
-        if sharpe > 2.0:
-            insights.append(f"Відмінний Sharpe Ratio: {sharpe:.2f} — ефективне співвідношення дохід/ризик")
+        if sharpe > 1.5:
+            insights.append(f"Відмінний Sharpe Ratio {sharpe:.2f} — ефективний баланс дохідності та ризику")
         elif sharpe < 0.5:
-            risks.append(f"Низький Sharpe Ratio: {sharpe:.2f} — портфель не компенсує ризик")
+            risks.append(f"Низький Sharpe Ratio {sharpe:.2f} — дохідність не компенсує ризик")
 
-        if risk == "low" and vol > 0.20:
-            risks.append(f"Волатильність {vol*100:.1f}% висока для консервативного профілю")
+        if risk == "low" and vol > 0.15:
+            risks.append(f"Волатильність {vol*100:.1f}% завелика для консервативного профілю (норма ≤15%)")
+        elif risk == "high" and vol < 0.10:
+            insights.append("Стабільний портфель навіть при агресивному профілі")
 
-    # Sentiment
     for ticker, signal in request.sentiment_signals.items():
         if signal == "negative":
-            risks.append(f"Негативний новинний фон по {ticker}")
+            risks.append(f"Негативний новинний фон по {ticker} — можливий короткостроковий тиск на ціну")
         elif signal == "positive":
-            insights.append(f"Позитивний сентимент новин по {ticker}")
+            insights.append(f"Позитивний медіасентимент по {ticker}")
 
-    # Forecast
     for ticker, change_pct in request.forecast_signals.items():
         if change_pct > 5:
-            insights.append(f"{ticker}: прогноз зростання +{change_pct:.1f}% за 30 днів")
+            insights.append(f"{ticker}: ML-прогноз зростання +{change_pct:.1f}% за 30 днів")
         elif change_pct < -5:
-            risks.append(f"{ticker}: прогноз падіння {change_pct:.1f}% за 30 днів")
-
-    # Рекомендація
-    n_risks = len(risks)
-    if n_risks == 0:
-        rec = "Портфель виглядає збалансовано. Продовжуйте поточну стратегію та переглядайте склад щоквартально."
-    elif n_risks <= 2:
-        rec = "Портфель потребує незначного коригування. Зверніть увагу на виявлені ризики."
-    else:
-        rec = "Виявлено кілька зон ризику. Рекомендується перебалансування портфеля відповідно до вашого профілю."
+            risks.append(f"{ticker}: ML-прогноз падіння {change_pct:.1f}% за 30 днів")
 
     if not insights:
-        insights.append("Регулярно переглядайте склад портфеля (раз на квартал)")
+        insights.append("Переглядайте склад портфеля щоквартально")
     if not risks:
-        risks.append("Ринковий ризик завжди присутній — тримайте 3-6 місяців витрат у готівці")
+        risks.append("Тримайте 3-6 місяців витрат у готівці як запасний фонд")
+
+    n_risks = len(risks)
+    if n_risks == 0:
+        rec = "Портфель виглядає збалансовано відповідно до вашого ризик-профілю. Дотримуйтесь поточної стратегії."
+    elif n_risks <= 2:
+        rec = "Портфель загалом в порядку, але є зони для покращення. Зверніть увагу на виявлені ризики."
+    else:
+        rec = f"Виявлено {n_risks} зони ризику. Рекомендується перебалансування портфеля."
 
     return AdvisorResponse(
-        recommendation=rec,
-        key_insights=insights,
-        risks=risks,
-        model="rule-based",
+        recommendation=rec, key_insights=insights[:5], risks=risks[:5], model="rule-based"
     )
-
-
-def _build_prompt(req: AdvisorRequest) -> str:
-    parts = [
-        f"Профіль ризику: {req.risk_tolerance}",
-        f"\nПортфель:\n{_format_dict(req.portfolio)}",
-    ]
-    if req.portfolio_metrics:
-        m = req.portfolio_metrics
-        parts.append(
-            f"\nМетрики: дохідність={m.get('expected_annual_return','N/A')}, "
-            f"волатильність={m.get('annual_volatility','N/A')}, "
-            f"Sharpe={m.get('sharpe_ratio','N/A')}"
-        )
-    if req.sentiment_signals:
-        parts.append(f"\nСентимент: {_format_dict(req.sentiment_signals)}")
-    if req.forecast_signals:
-        parts.append(f"\nПрогноз зміни (%): {_format_dict(req.forecast_signals)}")
-    if req.question:
-        parts.append(f"\nПитання: {req.question}")
-    parts.append(
-        "\nФормат відповіді:\n"
-        "РЕКОМЕНДАЦІЯ: [висновок]\n"
-        "ІНСАЙТИ:\n- [пункт]\nРИЗИКИ:\n- [пункт]"
-    )
-    return "\n".join(parts)
-
-
-def _format_dict(d: dict) -> str:
-    return ", ".join(f"{k}: {v}" for k, v in d.items())
-
-
-def _strip_md(text: str) -> str:
-    """Видаляє markdown форматування з тексту."""
-    import re
-    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)   # **bold**
-    text = re.sub(r'\*(.+?)\*', r'\1', text)         # *italic*
-    text = re.sub(r'#{1,3}\s*', '', text)             # ## заголовки
-    return text.strip()
 
 
 def _parse_response(text: str, model: str) -> AdvisorResponse:
     import re
-    clean = _strip_md(text)
+
+    # Прибираємо ВСІХ зірочок і решток markdown (не тільки парні)
+    clean = re.sub(r'\*+', '', text)
+    clean = re.sub(r'#+\s*', '', clean)
+    clean = re.sub(r'_{2,}', '', clean)
+
     recommendation, insights, risks = "", [], []
     section = None
 
@@ -177,29 +185,35 @@ def _parse_response(text: str, model: str) -> AdvisorResponse:
         line = line.strip()
         if not line:
             continue
-        if re.search(r'РЕКОМЕНДАЦ[ІI]Я\s*:', line, re.IGNORECASE):
-            recommendation = re.sub(r'РЕКОМЕНДАЦ[ІI]Я\s*:', '', line, flags=re.IGNORECASE).strip()
-            section = None
-        elif re.search(r'[ІI]НСАЙТИ\s*:', line, re.IGNORECASE):
-            section = "insights"
-        elif re.search(r'РИЗИКИ\s*:', line, re.IGNORECASE):
-            section = "risks"
-        elif line.startswith(('- ', '• ', '* ')):
-            item = line[2:].strip()
-            if section == "insights":
-                insights.append(item)
-            elif section == "risks":
-                risks.append(item)
-        elif section == "insights" and line and not line.endswith(':'):
-            insights.append(line)
-        elif section == "risks" and line and not line.endswith(':'):
-            risks.append(line)
 
-    # Fallback — якщо парсинг не спрацював, беремо весь текст як рекомендацію
+        if re.match(r'РЕКОМЕНДАЦ[ІI]Я\s*:', line, re.IGNORECASE):
+            recommendation = re.sub(r'РЕКОМЕНДАЦ[ІI]Я\s*:\s*', '', line, flags=re.IGNORECASE).strip()
+            section = "rec"
+        elif re.match(r'[ІI]НСАЙТИ\s*:', line, re.IGNORECASE):
+            section = "insights"
+        elif re.match(r'РИЗИКИ\s*:', line, re.IGNORECASE):
+            section = "risks"
+        elif re.match(r'^[-•–]\s+', line):
+            item = re.sub(r'^[-•–]\s+', '', line).strip()
+            if item:
+                if section == "insights":
+                    insights.append(item)
+                elif section == "risks":
+                    risks.append(item)
+        elif section == "rec":
+            # Продовження рекомендації на наступних рядках
+            recommendation = (recommendation + " " + line).strip()
+
     if not recommendation:
-        # Перший абзац як рекомендація
         paragraphs = [p.strip() for p in clean.split('\n\n') if p.strip()]
-        recommendation = paragraphs[0] if paragraphs else clean[:500]
+        recommendation = paragraphs[0] if paragraphs else clean[:600]
+
+    # Якщо Gemini не видав інсайти/ризики — витягуємо всі bullet-пункти з тексту
+    if not insights and not risks:
+        bullets = re.findall(r'^[-•–]\s+(.+)', clean, re.MULTILINE)
+        mid = len(bullets) // 2
+        insights = bullets[:mid] or bullets
+        risks = bullets[mid:] if mid else []
 
     return AdvisorResponse(
         recommendation=recommendation,

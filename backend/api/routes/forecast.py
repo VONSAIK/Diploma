@@ -37,8 +37,8 @@ async def get_forecast(
     model: str = Query(default="arima", pattern="^(arima|lstm|xgboost)$"),
     interval: str = Query(default="1d", pattern="^(1d|1h)$"),
 ):
-    if interval == "1h" and model in ("lstm", "xgboost"):
-        raise HTTPException(status_code=400, detail="LSTM та XGBoost підтримують лише денний інтервал (1d)")
+    # Для погодинних даних XGBoost і LSTM теж можуть тренуватися (≈420 точок за 60 днів)
+    # але XGBoost потребує технічні індикатори — передаємо ті ж самі дані
 
     period = INTERVAL_PERIOD.get(interval, "2y")
 
