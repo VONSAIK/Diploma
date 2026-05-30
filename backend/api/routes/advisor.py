@@ -1,7 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete
 
 from core.config import settings
+from core.security import get_current_user, get_optional_user
+from db.session import get_db
+from db.models import User, AdvisorQuery
 
 router = APIRouter()
 
@@ -22,14 +27,113 @@ class AdvisorResponse(BaseModel):
     model: str
 
 
+class AdvisorHistoryItem(BaseModel):
+    id: int
+    portfolio_label: str
+    portfolio_weights: dict
+    risk_tolerance: str
+    question: str
+    recommendation: str
+    key_insights: list[str]
+    risks: list[str]
+    model_used: str
+    created_at: str
+
+    model_config = {"from_attributes": True}
+
+
+def _make_portfolio_label(weights: dict[str, float]) -> str:
+    top = list(weights.items())[:3]
+    label = ", ".join(f"{k} {v*100:.0f}%" for k, v in top)
+    if len(weights) > 3:
+        label += f" +{len(weights) - 3}"
+    return label
+
+
 @router.post("/recommend", response_model=AdvisorResponse)
-async def get_recommendation(request: AdvisorRequest):
+async def get_recommendation(
+    request: AdvisorRequest,
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+):
     if settings.gemini_api_key:
         try:
-            return await _gemini_recommend(request)
+            result = await _gemini_recommend(request)
         except Exception as e:
             print(f"Gemini error: {e}")
-    return _rule_based_recommend(request)
+            result = _rule_based_recommend(request)
+    else:
+        result = _rule_based_recommend(request)
+
+    if current_user:
+        query = AdvisorQuery(
+            user_id=current_user.id,
+            portfolio_label=_make_portfolio_label(request.portfolio),
+            portfolio_weights=request.portfolio,
+            risk_tolerance=request.risk_tolerance,
+            question=request.question,
+            recommendation=result.recommendation,
+            key_insights=result.key_insights,
+            risks=result.risks,
+            model_used=result.model,
+        )
+        db.add(query)
+        await db.commit()
+
+    return result
+
+
+@router.get("/history", response_model=list[AdvisorHistoryItem])
+async def get_history(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(AdvisorQuery)
+        .where(AdvisorQuery.user_id == current_user.id)
+        .order_by(AdvisorQuery.created_at.desc())
+        .limit(20)
+    )
+    queries = result.scalars().all()
+    return [
+        AdvisorHistoryItem(
+            id=q.id,
+            portfolio_label=q.portfolio_label,
+            portfolio_weights=q.portfolio_weights,
+            risk_tolerance=q.risk_tolerance,
+            question=q.question,
+            recommendation=q.recommendation,
+            key_insights=q.key_insights,
+            risks=q.risks,
+            model_used=q.model_used,
+            created_at=q.created_at.strftime("%d.%m %H:%M"),
+        )
+        for q in queries
+    ]
+
+
+@router.delete("/history/{query_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_history_item(
+    query_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    query = await db.get(AdvisorQuery, query_id)
+    if not query or query.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Запис не знайдено")
+    db.delete(query)
+    await db.commit()
+
+
+@router.delete("/history", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_history(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(
+        delete(AdvisorQuery).where(AdvisorQuery.user_id == current_user.id)
+    )
+    await db.commit()
 
 
 async def _gemini_recommend(request: AdvisorRequest) -> AdvisorResponse:
@@ -83,13 +187,15 @@ async def _gemini_recommend(request: AdvisorRequest) -> AdvisorResponse:
 
     prompt = "\n".join(prompt_parts)
 
-    # gemini-2.5-flash-lite — без thinking tokens, повна відповідь на free tier
     for model_name in ["gemini-2.5-flash-lite", "gemini-2.5-flash"]:
         try:
+            from google.genai import types as genai_types
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
-                config={"max_output_tokens": 1500, "temperature": 0.4},
+                config=genai_types.GenerateContentConfig(
+                    max_output_tokens=1500, temperature=0.4
+                ),
             )
             raw = response.text or ""
             if raw and len(raw) > 50:
@@ -173,7 +279,6 @@ def _rule_based_recommend(request: AdvisorRequest) -> AdvisorResponse:
 def _parse_response(text: str, model: str) -> AdvisorResponse:
     import re
 
-    # Прибираємо ВСІХ зірочок і решток markdown (не тільки парні)
     clean = re.sub(r'\*+', '', text)
     clean = re.sub(r'#+\s*', '', clean)
     clean = re.sub(r'_{2,}', '', clean)
@@ -201,14 +306,12 @@ def _parse_response(text: str, model: str) -> AdvisorResponse:
                 elif section == "risks":
                     risks.append(item)
         elif section == "rec":
-            # Продовження рекомендації на наступних рядках
             recommendation = (recommendation + " " + line).strip()
 
     if not recommendation:
         paragraphs = [p.strip() for p in clean.split('\n\n') if p.strip()]
         recommendation = paragraphs[0] if paragraphs else clean[:600]
 
-    # Якщо Gemini не видав інсайти/ризики — витягуємо всі bullet-пункти з тексту
     if not insights and not risks:
         bullets = re.findall(r'^[-•–]\s+(.+)', clean, re.MULTILINE)
         mid = len(bullets) // 2

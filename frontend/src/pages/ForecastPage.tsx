@@ -1,256 +1,315 @@
-import { useState } from 'react'
-import {
-  ComposedChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Legend, ReferenceLine,
-} from 'recharts'
-import { forecastApi, ForecastResponse } from '../services/api'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useLocalState } from '../hooks/useLocalState'
+import { forecastApi, ForecastResponse, OHLCVPoint } from '../services/api'
 import { useAsync } from '../hooks/useAsync'
-import Card from '../components/ui/Card'
-import Spinner from '../components/ui/Spinner'
 import AssetSelector from '../components/ui/AssetSelector'
+import FinancialChart from '../components/ui/FinancialChart'
 
 const DAILY_STEPS  = [7, 14, 30, 60, 90]
 const HOURLY_STEPS = [12, 24, 48]
 
-const MODEL_INFO: Record<string, { label: string; desc: string; color: string }> = {
-  arima:    { label: 'ARIMA',           desc: 'Статистична модель часового ряду. Аналізує автокореляцію минулих цін. Краще для 7-14 днів.', color: '#f59e0b' },
-  xgboost:  { label: 'XGBoost (ML)',    desc: 'Machine Learning — градієнтний бустинг на 18 технічних індикаторах (RSI, MACD, Bollinger Bands тощо).', color: '#10b981' },
-  lstm:     { label: 'LSTM (Deep Learning)', desc: 'Рекурентна нейронна мережа. Вчиться на послідовностях цін, запам\'ятовує довгострокові патерни.', color: '#8b5cf6' },
-}
+const MODEL_INFO = {
+  xgboost: { label: 'XGBoost', tag: 'Machine Learning', color: '#6ee7b7' },
+  lstm:    { label: 'LSTM',    tag: 'Deep Learning',    color: '#c4b5fd' },
+} as const
 
 export default function ForecastPage() {
-  const [ticker, setTicker]     = useState('AAPL')
-  const [steps, setSteps]       = useState(30)
-  const [model, setModel]       = useState<'arima' | 'lstm' | 'xgboost'>('arima')
-  const [interval, setInterval] = useState<'1d' | '1h'>('1d')
+  const [ticker, setTicker]     = useLocalState('forecast:ticker', 'AAPL')
+  const [steps, setSteps]       = useLocalState('forecast:steps', 30)
+  const [model, setModel]       = useLocalState<'lstm' | 'xgboost'>('forecast:model', 'xgboost')
+  const [interval, setInterval] = useLocalState<'1d' | '1h'>('forecast:interval', '1d')
+  const [liveBar, setLiveBar]   = useState<OHLCVPoint | null>(null)
+  const [showMetrics, setShowMetrics] = useState(false)
+
+  // Measure chart area with ResizeObserver → pass explicit px to FinancialChart
+  const chartAreaRef = useRef<HTMLDivElement>(null)
+  const [chartDims, setChartDims] = useState({ w: 0, h: 0 })
+
+  useEffect(() => {
+    const el = chartAreaRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      const r = entries[0]?.contentRect
+      if (r && r.width > 0 && r.height > 0) {
+        setChartDims({ w: Math.floor(r.width), h: Math.floor(r.height) })
+      }
+    })
+    ro.observe(el)
+    // Also read immediately (in case already sized)
+    const r = el.getBoundingClientRect()
+    if (r.width > 0 && r.height > 0) setChartDims({ w: Math.floor(r.width), h: Math.floor(r.height) })
+    return () => ro.disconnect()
+  }, [])
+
   const { data, loading, error, run } = useAsync<ForecastResponse>()
 
-  const isHourly = interval === '1h'
+  const isHourly  = interval === '1h'
+  const modelInfo = MODEL_INFO[model]
+
+  // Auto-fetch on param change (debounced 700ms for ticker)
+  useEffect(() => {
+    if (!ticker.trim()) return
+    const t = setTimeout(() =>
+      run(forecastApi.get(ticker.toUpperCase(), steps, model, interval)), 700)
+    return () => clearTimeout(t)
+  }, [ticker, steps, model, interval])
 
   const handleIntervalChange = (val: '1d' | '1h') => {
     setInterval(val)
-    if (val === '1h' && model !== 'arima') setModel('arima')
     setSteps(val === '1h' ? 24 : 30)
+    setLiveBar(null)
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    run(forecastApi.get(ticker.toUpperCase(), steps, model, interval))
-  }
+  const handleLiveUpdate = useCallback((pt: OHLCVPoint) => setLiveBar(pt), [])
 
-  // Об'єднуємо реальну історію + прогноз на одному графіку
-  const chartData = data ? [
-    ...data.history.map(p => ({
-      date: p.date,
-      actual: p.price,
-      forecast: undefined as number | undefined,
-      lower: undefined as number | undefined,
-      upper: undefined as number | undefined,
-    })),
-    ...data.predictions.map((p, i) => ({
-      date: p.date,
-      actual: undefined as number | undefined,
-      forecast: p.price,
-      lower: data.confidence_interval?.[i]?.lower,
-      upper: data.confidence_interval?.[i]?.upper,
-    })),
-  ] : []
+  const currentBar   = liveBar ?? data?.history[data.history.length - 1]
+  const firstBar     = data?.history[0]
+  const lastForecast = data?.predictions[data.predictions.length - 1]
 
-  // Дата розподілу між реальними і прогнозними даними
-  const splitDate = data?.history[data.history.length - 1]?.date
-
-  const formatXTick = (val: string) =>
-    isHourly ? val.slice(11, 16) : val.slice(5)
-
-  const modelInfo = MODEL_INFO[model]
+  const pctChange = (currentBar && firstBar?.close)
+    ? ((currentBar.close - firstBar.close) / firstBar.close) * 100 : null
+  const forecastPct = (lastForecast && currentBar?.close)
+    ? ((lastForecast.price - currentBar.close) / currentBar.close) * 100 : null
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Прогноз цін акцій</h1>
-        <p className="text-gray-400 text-sm mt-1">ML-прогноз з відображенням реальної історії та майбутнього тренду</p>
+    <div className="relative flex flex-col bg-[#0a0a0a]" style={{ height: '100vh' }}>
+
+      {/* ══ TOP BAR: controls ════════════════════════════════════════════════ */}
+      <div className="flex-shrink-0 z-30 bg-[#0c0c0c] border-b border-[#161616]">
+        <div className="flex flex-wrap items-end gap-3 px-5 py-3">
+
+          <AssetSelector value={ticker} onChange={setTicker} />
+
+          {/* Interval */}
+          <div>
+            <div className="text-[10px] text-[#333] uppercase tracking-wider mb-1.5">Інтервал</div>
+            <div className="flex rounded-lg overflow-hidden border border-[#1e1e1e]">
+              {(['1d', '1h'] as const).map(iv => (
+                <button key={iv} onClick={() => handleIntervalChange(iv)}
+                  className={`px-3 py-2 text-xs font-medium transition-colors ${
+                    interval === iv ? 'bg-white text-[#0a0a0a]' : 'bg-[#111] text-[#555] hover:text-white'
+                  }`}>
+                  {iv === '1d' ? 'Денний' : 'Погодинний'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Steps */}
+          <div>
+            <div className="text-[10px] text-[#333] uppercase tracking-wider mb-1.5">
+              {isHourly ? 'Годин' : 'Днів'} прогнозу
+            </div>
+            <select value={steps} onChange={e => setSteps(Number(e.target.value))}
+              className="bg-[#111] border border-[#1e1e1e] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[#333] h-[36px]">
+              {(isHourly ? HOURLY_STEPS : DAILY_STEPS).map(s => (
+                <option key={s} value={s}>{s} {isHourly ? 'год' : 'дн'}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Model toggle */}
+          <div>
+            <div className="text-[10px] text-[#333] uppercase tracking-wider mb-1.5">ML Модель</div>
+            <div className="flex rounded-lg overflow-hidden border border-[#1e1e1e]">
+              {(Object.entries(MODEL_INFO) as [string, typeof MODEL_INFO['xgboost']][]).map(([key, info]) => (
+                <button key={key}
+                  onClick={() => setModel(key as keyof typeof MODEL_INFO)}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-all ${
+                    model === key ? 'bg-white text-[#0a0a0a]' : 'bg-[#111] text-[#555] hover:text-white'
+                  }`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                    style={{ background: model === key ? '#0a0a0a' : info.color }}
+                  />
+                  {info.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Refresh */}
+          <button
+            disabled={loading}
+            onClick={() => run(forecastApi.get(ticker.toUpperCase(), steps, model, interval))}
+            className="bg-white hover:bg-[#e5e5e5] disabled:opacity-40 text-[#0a0a0a] px-4 py-2 rounded-lg text-xs font-semibold transition-colors h-[36px] whitespace-nowrap"
+          >
+            {loading ? '⟳ Завантаження...' : '⟳ Оновити'}
+          </button>
+
+          {error && (
+            <div className="text-[11px] text-[#f87171] bg-[#1a0a0a] border border-[#3a1515] px-3 py-2 rounded-lg h-[36px] flex items-center">
+              {error}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Форма */}
-      <Card>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="flex flex-wrap gap-3 items-end">
-            <AssetSelector value={ticker} onChange={setTicker} />
+      {/* ══ CHART AREA — ref measures actual px, passed to chart ══════════════ */}
+      <div ref={chartAreaRef} className="flex-1 min-h-0 relative overflow-hidden">
 
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Інтервал</label>
-              <div className="flex rounded-lg overflow-hidden border border-gray-700">
-                {(['1d', '1h'] as const).map(iv => (
-                  <button key={iv} type="button" onClick={() => handleIntervalChange(iv)}
-                    className={`px-3 py-2 text-sm font-medium transition-colors ${interval === iv ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
-                    {iv === '1d' ? 'Денний' : 'Погодинний'}
-                  </button>
-                ))}
-              </div>
-            </div>
+        {/* Render chart only when we have real dimensions */}
+        {chartDims.h > 0 && (
+          <FinancialChart
+            key={interval}
+            history={data?.history ?? []}
+            predictions={data?.predictions ?? []}
+            confidenceInterval={data?.confidence_interval}
+            forecastColor={modelInfo.color}
+            interval={interval}
+            ticker={ticker.toUpperCase()}
+            width={chartDims.w}
+            height={chartDims.h}
+            onLiveUpdate={handleLiveUpdate}
+          />
+        )}
 
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">{isHourly ? 'Годин' : 'Днів'}</label>
-              <select value={steps} onChange={e => setSteps(Number(e.target.value))}
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-                {(isHourly ? HOURLY_STEPS : DAILY_STEPS).map(s => (
-                  <option key={s} value={s}>{s} {isHourly ? 'год' : 'дн'}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Модель</label>
-              <select value={model} onChange={e => setModel(e.target.value as 'arima' | 'lstm' | 'xgboost')}
-                className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-                <option value="arima">ARIMA — статистична</option>
-                <option value="xgboost">XGBoost — ML</option>
-                <option value="lstm">LSTM — Deep Learning</option>
-              </select>
-            </div>
-
-            <button type="submit" disabled={loading}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">
-              {loading ? 'Обробка...' : 'Прогноз'}
-            </button>
-          </div>
-
-
-          {/* Пояснення поточної моделі */}
-          <div className="bg-gray-800/50 border border-gray-700 rounded-lg px-4 py-3">
-            <span className="text-xs font-semibold" style={{ color: modelInfo.color }}>
-              {modelInfo.label}
+        {/* Loading spinner */}
+        {loading && (
+          <div className="absolute top-4 right-4 z-20 flex items-center gap-2 pointer-events-none">
+            <div className="w-4 h-4 border border-[#333] border-t-[#888] rounded-full animate-spin" />
+            <span className="text-[11px] text-[#444]">
+              {model === 'xgboost' ? 'XGBoost...' : model === 'lstm' ? 'LSTM...' : 'ARIMA...'}
             </span>
-            <span className="text-xs text-gray-400 ml-2">{modelInfo.desc}</span>
           </div>
-        </form>
-      </Card>
+        )}
 
-      {error && (
-        <div className="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-400 text-sm">{error}</div>
-      )}
+        {/* Empty state */}
+        {!data && !loading && !error && chartDims.h > 0 && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none">
+            <p className="text-[#222] text-sm">Завантаження даних...</p>
+          </div>
+        )}
+      </div>
 
-      {loading && (
-        <div className="space-y-2">
-          <Spinner />
-          <p className="text-center text-gray-500 text-sm">
-            {model === 'xgboost' ? 'XGBoost тренується на технічних індикаторах...'
-              : model === 'lstm' ? 'LSTM навчається на часовому ряді...'
-              : 'ARIMA аналізує часовий ряд...'}
-          </p>
-        </div>
-      )}
-
-      {data && (
-        <>
-          <Card title={`${data.ticker} · ${MODEL_INFO[data.model]?.label} · Остання ціна: $${data.history[data.history.length - 1]?.price}`}>
-            {/* Легенда пояснення */}
-            <div className="flex gap-4 mb-4 text-xs text-gray-400">
-              <span className="flex items-center gap-1.5">
-                <span className="w-6 h-0.5 bg-gray-300 inline-block rounded" />
-                Реальна ціна (останні {isHourly ? '48 год' : '60 днів'})
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-6 h-0.5 inline-block rounded" style={{ background: MODEL_INFO[data.model]?.color }} />
-                Прогноз ML ({steps} {isHourly ? 'годин' : 'днів'})
-              </span>
-              {data.confidence_interval && (
-                <span className="flex items-center gap-1.5">
-                  <span className="w-6 h-0.5 bg-blue-700 inline-block rounded opacity-60" />
-                  Довірчий інтервал 80%
+      {/* ══ BOTTOM BAR: stats ════════════════════════════════════════════════ */}
+      <div className="flex-shrink-0 z-30 bg-[#0c0c0c] border-t border-[#161616] px-5 py-2.5">
+        {data ? (
+          <>
+            <div className="flex items-center gap-4 flex-wrap">
+              {/* Current price */}
+              <div className="flex items-baseline gap-2">
+                <span className="text-[10px] text-[#333] uppercase tracking-wider">Ціна</span>
+                <span className="text-sm font-semibold font-mono text-white">
+                  {currentBar ? `$${currentBar.close.toFixed(2)}` : '—'}
                 </span>
-              )}
-            </div>
-
-            <ResponsiveContainer width="100%" height={380}>
-              <ComposedChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fill: '#9ca3af', fontSize: 11 }}
-                  tickFormatter={formatXTick}
-                  interval={Math.floor(chartData.length / 8)}
-                />
-                <YAxis
-                  tick={{ fill: '#9ca3af', fontSize: 11 }}
-                  domain={['auto', 'auto']}
-                  tickFormatter={v => `$${v}`}
-                />
-                <Tooltip
-                  contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8 }}
-                  labelStyle={{ color: '#6b7280', fontSize: 11 }}
-                  formatter={(val: number, name: string) => {
-                    const labels: Record<string, string> = {
-                      actual: 'Реальна', forecast: 'Прогноз', upper: 'Верхня межа', lower: 'Нижня межа'
-                    }
-                    return [`$${val?.toFixed(2)}`, labels[name] || name]
-                  }}
-                />
-                {/* Вертикальна лінія розділу реальне/прогноз */}
-                {splitDate && (
-                  <ReferenceLine x={splitDate} stroke="#374151" strokeDasharray="4 2"
-                    label={{ value: 'Сьогодні', fill: '#6b7280', fontSize: 10, position: 'top' }} />
-                )}
-                {/* Довірчий інтервал */}
-                {data.confidence_interval && (
-                  <>
-                    <Line dataKey="upper" stroke="#1d4ed8" strokeWidth={1} dot={false} strokeDasharray="3 2" legendType="none" />
-                    <Line dataKey="lower" stroke="#1d4ed8" strokeWidth={1} dot={false} strokeDasharray="3 2" legendType="none" />
-                  </>
-                )}
-                {/* Реальна ціна */}
-                <Line dataKey="actual" stroke="#d1d5db" strokeWidth={1.5} dot={false} connectNulls={false} legendType="none" />
-                {/* Прогноз */}
-                <Line
-                  dataKey="forecast"
-                  stroke={MODEL_INFO[data.model]?.color || '#3b82f6'}
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls={false}
-                  legendType="none"
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </Card>
-
-          {data.metrics && (
-            <Card title="Метрики ML моделі">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {data.metrics.cv_mape !== undefined && (
-                  <div className="bg-gray-800 rounded-lg p-4">
-                    <div className="text-xs text-gray-400 mb-1">Cross-Validation MAPE</div>
-                    <div className="text-2xl font-bold text-green-400">
-                      {(data.metrics.cv_mape as number).toFixed(2)}%
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      Середня абсолютна похибка на 5-fold TimeSeriesSplit. Чим менше — тим краще.
-                    </div>
-                  </div>
-                )}
-                {data.metrics.feature_importance && (
-                  <div className="bg-gray-800 rounded-lg p-4">
-                    <div className="text-xs text-gray-400 mb-3">Важливість ознак (Feature Importance)</div>
-                    {Object.entries(data.metrics.feature_importance as Record<string, number>)
-                      .slice(0, 6)
-                      .map(([feat, imp]) => (
-                        <div key={feat} className="flex items-center gap-2 mb-1.5">
-                          <div className="text-xs text-gray-300 w-28 truncate">{feat}</div>
-                          <div className="flex-1 bg-gray-700 rounded-full h-1.5">
-                            <div className="bg-green-500 h-1.5 rounded-full"
-                              style={{ width: `${Math.min(imp * 100, 100).toFixed(0)}%` }} />
-                          </div>
-                          <div className="text-xs text-gray-400 w-10 text-right">
-                            {(imp * 100).toFixed(1)}%
-                          </div>
-                        </div>
-                      ))}
-                  </div>
+                {pctChange != null && (
+                  <span className={`text-xs font-mono font-semibold ${pctChange >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'}`}>
+                    {pctChange >= 0 ? '+' : ''}{pctChange.toFixed(2)}%
+                  </span>
                 )}
               </div>
-            </Card>
-          )}
-        </>
-      )}
+
+              <div className="w-px h-4 bg-[#1e1e1e]" />
+
+              {/* Last candle OHLV */}
+              {currentBar && (
+                <div className="flex items-baseline gap-3 text-[11px] text-[#555]">
+                  <span>O <span className="text-[#888] font-mono">{currentBar.open.toFixed(2)}</span></span>
+                  <span>H <span className="text-[#4ade80] font-mono">{currentBar.high.toFixed(2)}</span></span>
+                  <span>L <span className="text-[#f87171] font-mono">{currentBar.low.toFixed(2)}</span></span>
+                  <span>V <span className="text-[#555] font-mono">{currentBar.volume.toLocaleString()}</span></span>
+                </div>
+              )}
+
+              <div className="w-px h-4 bg-[#1e1e1e]" />
+
+              {/* Forecast */}
+              <div className="flex items-baseline gap-2">
+                <span className="text-[10px] text-[#333] uppercase tracking-wider">
+                  +{steps}{isHourly ? 'г' : 'д'}
+                </span>
+                <span className="text-sm font-semibold font-mono" style={{ color: modelInfo.color }}>
+                  {lastForecast ? `$${lastForecast.price.toFixed(2)}` : '—'}
+                </span>
+                {forecastPct != null && (
+                  <span className={`text-xs font-mono ${forecastPct >= 0 ? 'text-[#4ade80]' : 'text-[#f87171]'}`}>
+                    {forecastPct >= 0 ? '+' : ''}{forecastPct.toFixed(2)}%
+                  </span>
+                )}
+              </div>
+
+              {/* CV метрики моделі */}
+              {data.metrics?.cv_mape != null && (
+                <>
+                  <div className="w-px h-4 bg-[#1e1e1e]" />
+                  <div className="flex items-baseline gap-3">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-[10px] text-[#333] uppercase tracking-wider">MAPE</span>
+                      <span className="text-sm font-mono text-white">{(data.metrics as any).cv_mape.toFixed(2)}%</span>
+                    </div>
+                    {(data.metrics as any).cv_rmse != null && (
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-[10px] text-[#333] uppercase tracking-wider">RMSE</span>
+                        <span className="text-sm font-mono text-[#888]">${(data.metrics as any).cv_rmse.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {(data.metrics as any).cv_mae != null && (
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-[10px] text-[#333] uppercase tracking-wider">MAE</span>
+                        <span className="text-sm font-mono text-[#888]">${(data.metrics as any).cv_mae.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Model label + feature importance toggle */}
+              <div className="ml-auto flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: modelInfo.color }} />
+                <span className="text-[11px] text-[#555]">{modelInfo.label}</span>
+                <span className="text-[10px] text-[#2a2a2a] border border-[#1a1a1a] px-1.5 py-0.5 rounded uppercase tracking-wide">
+                  {modelInfo.tag}
+                </span>
+                {(data.metrics as any)?.pretrained && (
+                  <span className="text-[10px] text-[#2a4a2a] border border-[#1a3a1a] bg-[#0f1f0f] px-1.5 py-0.5 rounded">
+                    pretrained
+                  </span>
+                )}
+                {data.metrics?.feature_importance && (
+                  <button
+                    onClick={() => setShowMetrics(v => !v)}
+                    className="text-[10px] text-[#333] hover:text-white border border-[#1a1a1a] px-2 py-1 rounded transition-colors ml-1"
+                  >
+                    {showMetrics ? '▼' : '▲'} Важливість ознак
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Feature importance (expandable) */}
+            {showMetrics && data.metrics?.feature_importance && (
+              <div className="mt-2.5 pt-2.5 border-t border-[#141414]">
+                <p className="text-[10px] text-[#2a2a2a] mb-2">Внесок технічних індикаторів у рішення моделі (XGBoost feature importance)</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-x-8 gap-y-1.5">
+                  {Object.entries(data.metrics.feature_importance as Record<string, number>)
+                    .slice(0, 10)
+                    .map(([feat, imp]) => (
+                      <div key={feat} className="flex items-center gap-2">
+                        <span className="text-[10px] text-[#444] w-20 truncate font-mono">{feat}</span>
+                        <div className="flex-1 bg-[#141414] rounded-full h-1">
+                          <div className="h-1 rounded-full transition-all" style={{
+                            width: `${Math.min(imp * 100, 100).toFixed(0)}%`,
+                            background: modelInfo.color,
+                          }} />
+                        </div>
+                        <span className="text-[10px] text-[#555] w-8 text-right font-mono">
+                          {(imp * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="h-5 flex items-center">
+            <span className="text-[11px] text-[#222]">
+              {loading ? 'Завантаження даних...' : 'Немає даних'}
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

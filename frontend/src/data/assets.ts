@@ -10,6 +10,7 @@ export type Category =
   | 'Охорона здоров\'я'
   | 'Енергетика'
   | 'Споживчі товари'
+  | 'Міжнародні'
   | 'ETF'
   | 'Індекси'
   | 'Крипто'
@@ -31,6 +32,10 @@ export const ASSETS: Asset[] = [
   { ticker: 'NFLX',  name: 'Netflix',            category: 'Технології' },
   { ticker: 'SHOP',  name: 'Shopify',            category: 'Технології' },
   { ticker: 'UBER',  name: 'Uber',               category: 'Технології' },
+  { ticker: 'PLTR',  name: 'Palantir',           category: 'Технології' },
+  { ticker: 'RBLX',  name: 'Roblox',             category: 'Технології' },
+  { ticker: 'SNOW',  name: 'Snowflake',          category: 'Технології' },
+  { ticker: 'CRWD',  name: 'CrowdStrike',        category: 'Технології' },
   // Фінанси
   { ticker: 'JPM',   name: 'JPMorgan Chase',     category: 'Фінанси' },
   { ticker: 'BAC',   name: 'Bank of America',    category: 'Фінанси' },
@@ -40,6 +45,8 @@ export const ASSETS: Asset[] = [
   { ticker: 'BRK-B', name: 'Berkshire Hathaway', category: 'Фінанси' },
   { ticker: 'WFC',   name: 'Wells Fargo',        category: 'Фінанси' },
   { ticker: 'MS',    name: 'Morgan Stanley',     category: 'Фінанси' },
+  { ticker: 'COIN',  name: 'Coinbase',           category: 'Фінанси' },
+  { ticker: 'HOOD',  name: 'Robinhood',          category: 'Фінанси' },
   // Охорона здоров'я
   { ticker: 'JNJ',   name: 'Johnson & Johnson',  category: 'Охорона здоров\'я' },
   { ticker: 'PFE',   name: 'Pfizer',             category: 'Охорона здоров\'я' },
@@ -58,14 +65,25 @@ export const ASSETS: Asset[] = [
   { ticker: 'WMT',   name: 'Walmart',            category: 'Споживчі товари' },
   { ticker: 'MCD',   name: "McDonald's",         category: 'Споживчі товари' },
   { ticker: 'NKE',   name: 'Nike',               category: 'Споживчі товари' },
+  // Міжнародні
+  { ticker: 'ASML',  name: 'ASML Holding',       category: 'Міжнародні' },
+  { ticker: 'SAP',   name: 'SAP SE',             category: 'Міжнародні' },
+  { ticker: 'TSM',   name: 'Taiwan Semiconductor', category: 'Міжнародні' },
+  { ticker: 'BABA',  name: 'Alibaba',            category: 'Міжнародні' },
+  { ticker: 'NVO',   name: 'Novo Nordisk',       category: 'Міжнародні' },
+  { ticker: 'TM',    name: 'Toyota',             category: 'Міжнародні' },
+  { ticker: 'SONY',  name: 'Sony Group',         category: 'Міжнародні' },
   // ETF
   { ticker: 'SPY',   name: 'S&P 500 ETF',        category: 'ETF' },
   { ticker: 'QQQ',   name: 'Nasdaq 100 ETF',     category: 'ETF' },
   { ticker: 'VTI',   name: 'Total Market ETF',   category: 'ETF' },
   { ticker: 'GLD',   name: 'Gold ETF',           category: 'ETF' },
+  { ticker: 'SLV',   name: 'Silver ETF',         category: 'ETF' },
+  { ticker: 'USO',   name: 'Oil ETF',            category: 'ETF' },
   { ticker: 'TLT',   name: 'Treasury Bonds ETF', category: 'ETF' },
   { ticker: 'VNQ',   name: 'Real Estate ETF',    category: 'ETF' },
   { ticker: 'EEM',   name: 'Emerging Markets ETF', category: 'ETF' },
+  { ticker: 'DBA',   name: 'Agriculture ETF',    category: 'ETF' },
   // Індекси
   { ticker: '^GSPC', name: 'S&P 500',            category: 'Індекси' },
   { ticker: '^IXIC', name: 'Nasdaq Composite',   category: 'Індекси' },
@@ -76,6 +94,11 @@ export const ASSETS: Asset[] = [
   { ticker: 'BNB-USD', name: 'BNB',              category: 'Крипто' },
   { ticker: 'SOL-USD', name: 'Solana',           category: 'Крипто' },
   { ticker: 'XRP-USD', name: 'XRP',              category: 'Крипто' },
+  { ticker: 'ADA-USD', name: 'Cardano',          category: 'Крипто' },
+  { ticker: 'DOGE-USD', name: 'Dogecoin',        category: 'Крипто' },
+  { ticker: 'AVAX-USD', name: 'Avalanche',       category: 'Крипто' },
+  { ticker: 'DOT-USD', name: 'Polkadot',         category: 'Крипто' },
+  { ticker: 'LINK-USD', name: 'Chainlink',       category: 'Крипто' },
 ]
 
 export const CATEGORIES = [...new Set(ASSETS.map(a => a.category))] as Category[]

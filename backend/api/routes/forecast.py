@@ -1,9 +1,9 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+import numpy as np
 
 from data.market_data import get_stock_data
 from ml.forecasting.lstm_model import LSTMForecaster
-from ml.forecasting.arima_model import ARIMAForecaster
 from ml.forecasting.xgboost_model import XGBoostForecaster
 
 router = APIRouter()
@@ -13,33 +13,66 @@ INTERVAL_PERIOD = {
     "1h": "60d",
 }
 
-# Скільки точок реальної історії показувати на графіку
 HISTORY_POINTS = {
-    "1d": 60,   # останні 60 днів
-    "1h": 48,   # останні 48 годин
+    "1d": 250,   # ~1 рік торгових днів
+    "1h": 72,
 }
+
+
+class OHLCVPoint(BaseModel):
+    date: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
 
 
 class ForecastResponse(BaseModel):
     ticker: str
     model: str
     interval: str
-    history: list[dict]        # реальні минулі ціни для графіку
-    predictions: list[dict]    # прогноз
+    history: list[OHLCVPoint]
+    predictions: list[dict]
     confidence_interval: list[dict] | None = None
     metrics: dict | None = None
+
+
+def _row_to_ohlcv(idx, row, fmt: str) -> dict:
+    return {
+        "date": idx.strftime(fmt),
+        "open":  round(float(row["open"]),  2),
+        "high":  round(float(row["high"]),  2),
+        "low":   round(float(row["low"]),   2),
+        "close": round(float(row["close"]), 2),
+        "volume": int(row["volume"]) if "volume" in row.index else 0,
+    }
+
+
+@router.get("/{ticker}/live")
+async def get_live_price(
+    ticker: str,
+    interval: str = Query(default="1d", pattern="^(1d|1h)$"),
+):
+    period = "5d" if interval == "1d" else "1d"
+    try:
+        df = get_stock_data(ticker.upper(), period=period, interval=interval)
+        if df.empty:
+            raise ValueError("No data")
+        fmt = "%Y-%m-%d %H:%M" if interval == "1h" else "%Y-%m-%d"
+        last_row = df.iloc[-1]
+        return _row_to_ohlcv(df.index[-1], last_row, fmt)
+    except Exception:
+        raise HTTPException(status_code=404, detail=f"Тікер {ticker} не знайдено")
 
 
 @router.get("/{ticker}", response_model=ForecastResponse)
 async def get_forecast(
     ticker: str,
     steps: int = Query(default=30, ge=1, le=168),
-    model: str = Query(default="arima", pattern="^(arima|lstm|xgboost)$"),
+    model: str = Query(default="xgboost", pattern="^(lstm|xgboost)$"),
     interval: str = Query(default="1d", pattern="^(1d|1h)$"),
 ):
-    # Для погодинних даних XGBoost і LSTM теж можуть тренуватися (≈420 точок за 60 днів)
-    # але XGBoost потребує технічні індикатори — передаємо ті ж самі дані
-
     period = INTERVAL_PERIOD.get(interval, "2y")
 
     try:
@@ -47,51 +80,35 @@ async def get_forecast(
     except Exception:
         raise HTTPException(status_code=404, detail=f"Тікер {ticker} не знайдено")
 
-    # Реальна історія для графіку
-    n_hist = HISTORY_POINTS.get(interval, 60)
+    n_hist = HISTORY_POINTS.get(interval, 250)
     hist_df = df.tail(n_hist)
     fmt = "%Y-%m-%d %H:%M" if interval == "1h" else "%Y-%m-%d"
+
     history = [
-        {"date": idx.strftime(fmt), "price": round(float(row["close"]), 2)}
+        _row_to_ohlcv(idx, row, fmt)
         for idx, row in hist_df.iterrows()
     ]
 
-    # Прогноз
-    if model == "arima":
-        result = ARIMAForecaster().predict(df, steps=steps, interval=interval)
-    elif model == "xgboost":
-        result = XGBoostForecaster().predict(df, days=steps)
+    if model == "xgboost":
+        result = XGBoostForecaster().predict(df, days=steps, ticker=ticker.upper())
     else:
         result = LSTMForecaster().predict(df, days=steps)
+
+    predictions = [
+        p for p in result["predictions"]
+        if isinstance(p.get("price"), (int, float))
+        and np.isfinite(p["price"])
+        and 0 < p["price"] < 1e9
+    ]
+    if not predictions:
+        raise HTTPException(status_code=500, detail="Модель повернула некоректні прогнози")
 
     return ForecastResponse(
         ticker=ticker.upper(),
         model=model,
         interval=interval,
         history=history,
-        predictions=result["predictions"],
+        predictions=predictions,
         confidence_interval=result.get("confidence_interval"),
         metrics=result.get("metrics"),
     )
-
-
-@router.get("/{ticker}/compare")
-async def compare_models(
-    ticker: str,
-    steps: int = Query(default=14, ge=1, le=30),
-):
-    try:
-        df = get_stock_data(ticker.upper(), period="2y", interval="1d")
-    except Exception:
-        raise HTTPException(status_code=404, detail=f"Тікер {ticker} не знайдено")
-
-    arima = ARIMAForecaster().predict(df, steps=steps, interval="1d")
-    xgb   = XGBoostForecaster().predict(df, days=steps)
-
-    return {
-        "ticker": ticker.upper(),
-        "steps": steps,
-        "arima": arima["predictions"],
-        "xgboost": xgb["predictions"],
-        "xgboost_metrics": xgb.get("metrics"),
-    }
