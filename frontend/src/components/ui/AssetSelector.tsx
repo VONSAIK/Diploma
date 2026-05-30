@@ -17,8 +17,7 @@ export default function AssetSelector({ value, onChange }: AssetSelectorProps) {
   const filtered = ASSETS.filter(a => {
     const matchCat = category === 'Всі' || a.category === category
     const q = search.toLowerCase()
-    const matchSearch = !q || a.ticker.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)
-    return matchCat && matchSearch
+    return matchCat && (!q || a.ticker.toLowerCase().includes(q) || a.name.toLowerCase().includes(q))
   })
 
   useEffect(() => {
@@ -37,43 +36,45 @@ export default function AssetSelector({ value, onChange }: AssetSelectorProps) {
 
   return (
     <div ref={ref} className="relative">
-      <label className="block text-xs text-gray-400 mb-1">Актив</label>
+      <label className="block text-[11px] text-[#444444] uppercase tracking-wider mb-1.5">Актив</label>
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-2 bg-gray-800 border border-gray-700 hover:border-gray-500 rounded-lg px-3 py-2 text-sm w-52 text-left transition-colors focus:outline-none focus:border-blue-500"
+        className="flex items-center gap-2 bg-[#141414] border border-[#222222] hover:border-[#333333] rounded-lg px-3 py-2 text-sm w-52 text-left transition-colors focus:outline-none focus:border-[#444444]"
       >
         <span className="flex-1 truncate">
-          <span className="font-mono text-blue-400">{value}</span>
-          {currentAsset && <span className="text-gray-400 ml-1.5 text-xs">{currentAsset.name}</span>}
+          <span className="font-mono text-white text-sm">{value}</span>
+          {currentAsset && (
+            <span className="text-[#444444] ml-1.5 text-xs">{currentAsset.name}</span>
+          )}
         </span>
-        <span className="text-gray-500 text-xs">{open ? '▲' : '▼'}</span>
+        <span className="text-[#333333] text-xs">{open ? '▲' : '▼'}</span>
       </button>
 
       {open && (
-        <div className="absolute z-50 top-full mt-1 w-80 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden">
-          {/* Пошук */}
-          <div className="p-2 border-b border-gray-800">
+        <div className="absolute z-50 top-full mt-1 w-80 bg-[#111111] border border-[#222222] rounded-xl shadow-2xl overflow-hidden">
+          {/* Search */}
+          <div className="p-2 border-b border-[#1a1a1a]">
             <input
               autoFocus
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Пошук тікера або назви..."
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500"
+              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-[#444444] placeholder:text-[#333333]"
             />
           </div>
 
-          {/* Фільтр категорій */}
-          <div className="flex gap-1 p-2 border-b border-gray-800 overflow-x-auto">
+          {/* Categories */}
+          <div className="flex gap-1 p-2 border-b border-[#1a1a1a] overflow-x-auto">
             {(['Всі', ...CATEGORIES] as const).map(cat => (
               <button
                 key={cat}
                 type="button"
                 onClick={() => setCategory(cat as Category | 'Всі')}
-                className={`flex-shrink-0 text-xs px-2 py-1 rounded-md transition-colors ${
+                className={`flex-shrink-0 text-xs px-2.5 py-1 rounded-md transition-colors font-medium ${
                   category === cat
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                    ? 'bg-white text-[#0a0a0a]'
+                    : 'bg-[#1a1a1a] text-[#555555] hover:text-white hover:bg-[#222222]'
                 }`}
               >
                 {cat}
@@ -81,23 +82,32 @@ export default function AssetSelector({ value, onChange }: AssetSelectorProps) {
             ))}
           </div>
 
-          {/* Список активів */}
+          {/* Asset list */}
           <div className="max-h-60 overflow-y-auto">
             {filtered.length === 0 ? (
-              <div className="text-center text-gray-500 text-sm py-4">Нічого не знайдено</div>
+              <div className="text-center text-[#333333] text-sm py-6">Нічого не знайдено</div>
             ) : (
               filtered.map(asset => (
                 <button
                   key={asset.ticker}
                   type="button"
                   onClick={() => select(asset.ticker)}
-                  className={`w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-gray-800 transition-colors text-left ${
-                    asset.ticker === value ? 'bg-blue-950/40' : ''
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm transition-colors text-left ${
+                    asset.ticker === value
+                      ? 'bg-[#1a1a1a]'
+                      : 'hover:bg-[#161616]'
                   }`}
                 >
-                  <span className="font-mono text-blue-400 w-16 flex-shrink-0">{asset.ticker}</span>
-                  <span className="text-gray-300 flex-1 truncate">{asset.name}</span>
-                  <span className="text-gray-600 text-xs">{asset.category}</span>
+                  <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                    asset.ticker === value ? 'bg-white' : 'bg-transparent'
+                  }`} />
+                  <span className={`font-mono w-14 flex-shrink-0 text-xs ${
+                    asset.ticker === value ? 'text-white' : 'text-[#666666]'
+                  }`}>{asset.ticker}</span>
+                  <span className={`flex-1 truncate ${
+                    asset.ticker === value ? 'text-white' : 'text-[#888888]'
+                  }`}>{asset.name}</span>
+                  <span className="text-[#2a2a2a] text-[10px]">{asset.category}</span>
                 </button>
               ))
             )}

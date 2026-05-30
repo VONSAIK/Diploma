@@ -7,9 +7,21 @@ import Spinner from '../components/ui/Spinner'
 import AssetSelector from '../components/ui/AssetSelector'
 
 const SIGNALS = {
-  positive: { label: 'Позитивний', color: 'text-green-400', bar: 'bg-green-500' },
-  negative: { label: 'Негативний', color: 'text-red-400', bar: 'bg-red-500' },
-  neutral:  { label: 'Нейтральний', color: 'text-gray-400', bar: 'bg-gray-500' },
+  positive: { label: 'Позитивний', color: '#4ade80', bar: '#4ade80', bg: '#0f2a1a', border: '#1a4a2a' },
+  negative: { label: 'Негативний', color: '#f87171', bar: '#f87171', bg: '#2a0f0f', border: '#4a1a1a' },
+  neutral:  { label: 'Нейтральний', color: '#666666', bar: '#444444', bg: '#141414', border: '#1e1e1e' },
+}
+
+const SCORE_LABELS = [
+  { threshold: 0.6,  label: 'Сильно позитивний' },
+  { threshold: 0.2,  label: 'Помірно позитивний' },
+  { threshold: -0.2, label: 'Нейтральний' },
+  { threshold: -0.6, label: 'Помірно негативний' },
+  { threshold: -1,   label: 'Сильно негативний' },
+]
+
+function getScoreLabel(score: number) {
+  return SCORE_LABELS.find(s => score >= s.threshold)?.label ?? 'Негативний'
 }
 
 export default function SentimentPage() {
@@ -22,22 +34,27 @@ export default function SentimentPage() {
     run(sentimentApi.get(ticker.toUpperCase(), days))
   }
 
+  const signal = data ? SIGNALS[data.signal] : null
+  const scorePercent = data ? Math.round(((data.score + 1) / 2) * 100) : 50
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold">Аналіз новин</h1>
-        <p className="text-gray-400 text-sm mt-1">FinBERT — sentiment analysis фінансових новин</p>
+        <h1 className="text-xl font-semibold text-white tracking-tight">Аналіз новин</h1>
+        <p className="text-[#555555] text-sm mt-1">FinBERT — нейромережа для sentiment analysis фінансових текстів</p>
       </div>
 
+      {/* Controls */}
       <Card>
         <form onSubmit={handleSubmit} className="flex flex-wrap gap-3 items-end">
           <AssetSelector value={ticker} onChange={setTicker} />
           <div>
-            <label className="block text-xs text-gray-400 mb-1">За останні</label>
+            <label className="block text-[11px] text-[#444444] uppercase tracking-wider mb-1.5">За останні</label>
             <select
               value={days}
               onChange={e => setDays(Number(e.target.value))}
-              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              className="bg-[#141414] border border-[#222222] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#444444]"
             >
               {[3, 7, 14, 30].map(d => <option key={d} value={d}>{d} днів</option>)}
             </select>
@@ -45,78 +62,128 @@ export default function SentimentPage() {
           <button
             type="submit"
             disabled={loading}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors"
+            className="bg-white hover:bg-[#e5e5e5] disabled:opacity-40 text-[#0a0a0a] px-5 py-2 rounded-lg text-sm font-semibold transition-colors"
           >
-            {loading ? 'Аналіз...' : 'Аналізувати'}
+            {loading ? 'Аналіз...' : 'Аналізувати →'}
           </button>
         </form>
       </Card>
 
       {error && (
-        <div className="bg-red-900/30 border border-red-800 rounded-lg px-4 py-3 text-red-400 text-sm">{error}</div>
+        <div className="bg-[#1a0a0a] border border-[#3a1515] rounded-xl px-4 py-3 text-[#f87171] text-sm">{error}</div>
       )}
-
       {loading && <Spinner />}
 
-      {data && (
+      {data && signal && (
         <>
-          <Card>
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="text-xl font-bold">{data.ticker}</div>
-                <div className="text-gray-400 text-sm">{data.company}</div>
-              </div>
-              <div className="text-right">
-                <div className={`text-2xl font-bold ${SIGNALS[data.signal].color}`}>
-                  {SIGNALS[data.signal].label}
+          {/* Main result card */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Signal */}
+            <div
+              className="md:col-span-2 rounded-xl p-5"
+              style={{ background: signal.bg, border: `1px solid ${signal.border}` }}
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <div className="text-2xl font-bold text-white">{data.ticker}</div>
+                  <div className="text-sm text-[#555555] mt-0.5">{data.company}</div>
                 </div>
-                <div className="text-gray-400 text-sm">Score: {data.score.toFixed(3)}</div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold" style={{ color: signal.color }}>{signal.label}</div>
+                  <div className="text-xs text-[#444444] mt-0.5">{getScoreLabel(data.score)}</div>
+                </div>
               </div>
+
+              {/* Score bar */}
+              <div className="mb-3">
+                <div className="flex justify-between text-[10px] text-[#333333] mb-1">
+                  <span>Негативний</span>
+                  <span>Score: {data.score.toFixed(3)}</span>
+                  <span>Позитивний</span>
+                </div>
+                <div className="h-2 bg-[#1a1a1a] rounded-full overflow-hidden relative">
+                  <div
+                    className="absolute top-0 bottom-0 w-2 rounded-full transition-all"
+                    style={{ left: `${Math.max(0, Math.min(98, scorePercent))}%`, background: signal.color }}
+                  />
+                </div>
+              </div>
+
+              {/* Breakdown bars */}
+              {data.breakdown && (
+                <div className="space-y-2 mt-4">
+                  {(['positive', 'negative', 'neutral'] as const).map(s => {
+                    const count = data.breakdown[s]
+                    const pct = data.count > 0 ? Math.round((count / data.count) * 100) : 0
+                    return (
+                      <div key={s} className="flex items-center gap-3">
+                        <div className="w-20 text-[11px]" style={{ color: SIGNALS[s].color }}>{SIGNALS[s].label}</div>
+                        <div className="flex-1 bg-[#1a1a1a] rounded-full h-1.5">
+                          <div className="h-1.5 rounded-full transition-all"
+                            style={{ width: `${pct}%`, background: SIGNALS[s].bar }} />
+                        </div>
+                        <div className="text-[11px] text-[#444444] w-16 text-right font-mono">{count} ({pct}%)</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {data.note && (
+                <div className="mt-3 text-[11px] text-[#444444] italic">{data.note}</div>
+              )}
             </div>
 
-            {data.breakdown && (
-              <div className="mt-4 space-y-2">
-                {(['positive', 'negative', 'neutral'] as const).map(s => {
-                  const count = data.breakdown[s]
-                  const pct = data.count > 0 ? Math.round((count / data.count) * 100) : 0
-                  return (
-                    <div key={s} className="flex items-center gap-3">
-                      <div className="w-20 text-xs text-gray-400">{SIGNALS[s].label}</div>
-                      <div className="flex-1 bg-gray-800 rounded-full h-2">
-                        <div className={`${SIGNALS[s].bar} h-2 rounded-full`} style={{ width: `${pct}%` }} />
-                      </div>
-                      <div className="text-xs text-gray-400 w-12 text-right">{count} ({pct}%)</div>
-                    </div>
-                  )
-                })}
+            {/* Stats */}
+            <div className="space-y-3">
+              <div className="bg-[#0f0f0f] border border-[#1e1e1e] rounded-xl p-4">
+                <div className="text-[10px] text-[#333333] uppercase tracking-widest mb-1">Кількість новин</div>
+                <div className="text-3xl font-bold text-white">{data.count}</div>
+                <div className="text-[11px] text-[#444444] mt-1">за {days} днів</div>
               </div>
-            )}
+              <div className="bg-[#0f0f0f] border border-[#1e1e1e] rounded-xl p-4">
+                <div className="text-[10px] text-[#333333] uppercase tracking-widest mb-1">Confidence Score</div>
+                <div className="text-3xl font-bold" style={{ color: signal.color }}>
+                  {Math.abs(data.score).toFixed(2)}
+                </div>
+                <div className="text-[11px] text-[#444444] mt-1">|-1 негативний · +1 позитивний|</div>
+              </div>
+              <div className="bg-[#0f0f0f] border border-[#1e1e1e] rounded-xl p-4">
+                <div className="text-[10px] text-[#333333] uppercase tracking-widest mb-2">Розподіл</div>
+                {data.breakdown && (['positive', 'negative', 'neutral'] as const).map(s => (
+                  <div key={s} className="flex justify-between text-[11px] mb-1">
+                    <span style={{ color: SIGNALS[s].color }}>{SIGNALS[s].label}</span>
+                    <span className="text-[#444444] font-mono">
+                      {data.count > 0 ? Math.round((data.breakdown[s] / data.count) * 100) : 0}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
 
-            {data.note && (
-              <div className="mt-3 text-xs text-gray-500 italic">{data.note}</div>
-            )}
-          </Card>
-
+          {/* Articles */}
           {data.articles.length > 0 && (
-            <Card title="Новини">
-              <div className="space-y-3">
+            <Card title={`Новини (${data.articles.length})`}>
+              <div className="space-y-2">
                 {data.articles.map((a, i) => (
-                  <div key={i} className="flex gap-3 p-3 bg-gray-800 rounded-lg">
+                  <div key={i} className="flex gap-4 px-4 py-3 bg-[#0f0f0f] border border-[#1a1a1a] rounded-xl hover:border-[#2a2a2a] transition-colors">
                     <div className="flex-1 min-w-0">
                       <a
                         href={a.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-sm font-medium hover:text-blue-400 transition-colors line-clamp-2"
+                        className="text-sm font-medium text-white hover:text-[#cccccc] transition-colors line-clamp-2 leading-snug"
                       >
                         {a.title}
                       </a>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-gray-500">{a.source}</span>
-                        <span className="text-xs text-gray-600">{a.published_at.slice(0, 10)}</span>
+                      <div className="flex items-center gap-3 mt-1.5">
+                        <span className="text-[11px] text-[#444444]">{a.source}</span>
+                        <span className="text-[#222222]">·</span>
+                        <span className="text-[11px] text-[#333333]">{a.published_at.slice(0, 10)}</span>
                       </div>
                     </div>
-                    <div className="flex-shrink-0">
+                    <div className="flex-shrink-0 pt-0.5">
                       <Badge variant={a.sentiment as 'positive' | 'negative' | 'neutral'}>
                         {a.confidence.toFixed(2)}
                       </Badge>

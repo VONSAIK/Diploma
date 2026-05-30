@@ -1,9 +1,9 @@
 import clsx from 'clsx'
 
 const variants = {
-  positive: 'bg-green-900/50 text-green-400 border-green-800',
-  negative: 'bg-red-900/50 text-red-400 border-red-800',
-  neutral:  'bg-gray-800 text-gray-400 border-gray-700',
+  positive: 'bg-[#0f2a1a] text-[#4ade80] border-[#1a4a2a]',
+  negative: 'bg-[#2a0f0f] text-[#f87171] border-[#4a1a1a]',
+  neutral:  'bg-[#1a1a1a] text-[#666666] border-[#2a2a2a]',
 }
 
 interface BadgeProps {

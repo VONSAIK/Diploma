@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, Query
 
 from data.news_fetcher import fetch_news
@@ -28,13 +29,14 @@ async def get_sentiment(
             "company": company_name,
             "signal": "neutral",
             "score": 0.0,
-            "news_count": 0,
+            "count": 0,
+            "breakdown": {"positive": 0, "negative": 0, "neutral": 0},
             "articles": [],
             "note": "Новини не знайдено або NEWS_API_KEY не налаштовано",
         }
 
     texts = [f"{a['title']}. {a.get('description', '')}" for a in news]
-    analyses = analyzer.analyze(texts)
+    analyses = await asyncio.to_thread(analyzer.analyze, texts)
     summary = analyzer.aggregate(analyses)
 
     enriched = [
