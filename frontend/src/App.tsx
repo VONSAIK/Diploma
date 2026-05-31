@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import ForecastPage from './pages/ForecastPage'
@@ -131,18 +132,34 @@ function PageWrap({ children }: { children: React.ReactNode }) {
   )
 }
 
+const PAGE_TITLES: Record<string, string> = {
+  '/':          'Прогноз — Investment AI',
+  '/portfolio': 'Портфель — Investment AI',
+  '/sentiment': 'Новини — Investment AI',
+  '/advisor':   'AI Радник — Investment AI',
+}
+
+function PageTitleSync() {
+  const { pathname } = useLocation()
+  useEffect(() => {
+    document.title = PAGE_TITLES[pathname] ?? 'Investment AI'
+  }, [pathname])
+  return null
+}
+
 function Layout() {
   return (
     <div className="flex h-screen bg-[#0a0a0a] overflow-hidden">
+      <PageTitleSync />
       <Sidebar />
       <main className="ml-[220px] flex-1 overflow-auto">
         <Routes>
           {/* Forecast: full-bleed, no wrapper */}
           <Route path="/" element={<ForecastPage />} />
           {/* Rest: centred with max-width */}
-          <Route path="/portfolio" element={<PageWrap><PortfolioPage /></PageWrap>} />
-          <Route path="/sentiment" element={<PageWrap><SentimentPage /></PageWrap>} />
-          <Route path="/advisor"   element={<PageWrap><AdvisorPage /></PageWrap>} />
+          <Route path="/portfolio" element={<PortfolioPage />} />
+          <Route path="/sentiment" element={<SentimentPage />} />
+          <Route path="/advisor"   element={<AdvisorPage />} />
           <Route path="*" element={
             <div className="flex flex-col items-center justify-center h-screen text-center">
               <div className="text-7xl font-bold text-[#1a1a1a] mb-4 tracking-tight">404</div>

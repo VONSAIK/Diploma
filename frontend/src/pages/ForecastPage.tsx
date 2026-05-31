@@ -9,14 +9,15 @@ const DAILY_STEPS  = [7, 14, 30, 60, 90]
 const HOURLY_STEPS = [12, 24, 48]
 
 const MODEL_INFO = {
-  xgboost: { label: 'XGBoost', tag: 'Machine Learning', color: '#6ee7b7' },
-  lstm:    { label: 'LSTM',    tag: 'Deep Learning',    color: '#c4b5fd' },
+  xgboost: { label: 'XGBoost', tag: 'Machine Learning',   color: '#6ee7b7' },
+  lstm:    { label: 'LSTM',    tag: 'Deep Learning',       color: '#c4b5fd' },
+  prophet: { label: 'Prophet', tag: 'Time Series',         color: '#fde68a' },
 } as const
 
 export default function ForecastPage() {
   const [ticker, setTicker]     = useLocalState('forecast:ticker', 'AAPL')
   const [steps, setSteps]       = useLocalState('forecast:steps', 30)
-  const [model, setModel]       = useLocalState<'lstm' | 'xgboost'>('forecast:model', 'xgboost')
+  const [model, setModel]       = useLocalState<'lstm' | 'xgboost' | 'prophet'>('forecast:model', 'xgboost')
   const [interval, setInterval] = useLocalState<'1d' | '1h'>('forecast:interval', '1d')
   const [liveBar, setLiveBar]   = useState<OHLCVPoint | null>(null)
   const [showMetrics, setShowMetrics] = useState(false)
@@ -103,7 +104,7 @@ export default function ForecastPage() {
             <select value={steps} onChange={e => setSteps(Number(e.target.value))}
               className="bg-[#111] border border-[#1e1e1e] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[#333] h-[36px]">
               {(isHourly ? HOURLY_STEPS : DAILY_STEPS).map(s => (
-                <option key={s} value={s}>{s} {isHourly ? 'год' : 'дн'}</option>
+                <option key={s} value={s}>{s} {isHourly ? 'год' : 'днів'}</option>
               ))}
             </select>
           </div>
@@ -115,7 +116,8 @@ export default function ForecastPage() {
               {(Object.entries(MODEL_INFO) as [string, typeof MODEL_INFO['xgboost']][]).map(([key, info]) => (
                 <button key={key}
                   onClick={() => setModel(key as keyof typeof MODEL_INFO)}
-                  className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-all ${
+                  disabled={key === 'prophet' && interval === '1h'}
+                  className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-all disabled:opacity-30 ${
                     model === key ? 'bg-white text-[#0a0a0a]' : 'bg-[#111] text-[#555] hover:text-white'
                   }`}
                 >
@@ -169,7 +171,7 @@ export default function ForecastPage() {
           <div className="absolute top-4 right-4 z-20 flex items-center gap-2 pointer-events-none">
             <div className="w-4 h-4 border border-[#333] border-t-[#888] rounded-full animate-spin" />
             <span className="text-[11px] text-[#444]">
-              {model === 'xgboost' ? 'XGBoost...' : model === 'lstm' ? 'LSTM...' : 'ARIMA...'}
+              {model === 'xgboost' ? 'XGBoost...' : model === 'lstm' ? 'LSTM...' : 'Prophet...'}
             </span>
           </div>
         )}
@@ -235,7 +237,9 @@ export default function ForecastPage() {
                   <div className="w-px h-4 bg-[#1e1e1e]" />
                   <div className="flex items-baseline gap-3">
                     <div className="flex items-baseline gap-1.5">
-                      <span className="text-[10px] text-[#333] uppercase tracking-wider">MAPE</span>
+                      <span className="text-[10px] text-[#333] uppercase tracking-wider" title={model === 'xgboost' ? 'Cross-validation MAPE' : 'Validation MAPE'}>
+                        MAPE
+                      </span>
                       <span className="text-sm font-mono text-white">{(data.metrics as any).cv_mape.toFixed(2)}%</span>
                     </div>
                     {(data.metrics as any).cv_rmse != null && (

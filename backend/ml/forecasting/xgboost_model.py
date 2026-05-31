@@ -114,8 +114,6 @@ class XGBoostForecaster:
         # Фінальне навчання на всіх даних
         self.model.fit(X_scaled, y_returns)
 
-        df_feat = add_technical_indicators(df)
-        features = [c for c in FEATURE_COLS if c in df_feat.columns]
         imp = self.model.feature_importances_
         self.feature_importance_ = dict(sorted(
             zip(features, imp.tolist()),

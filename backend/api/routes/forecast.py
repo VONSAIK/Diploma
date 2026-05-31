@@ -5,6 +5,7 @@ import numpy as np
 from data.market_data import get_stock_data
 from ml.forecasting.lstm_model import LSTMForecaster
 from ml.forecasting.xgboost_model import XGBoostForecaster
+from ml.forecasting.prophet_model import ProphetForecaster
 
 router = APIRouter()
 
@@ -40,11 +41,11 @@ class ForecastResponse(BaseModel):
 
 def _row_to_ohlcv(idx, row, fmt: str) -> dict:
     return {
-        "date": idx.strftime(fmt),
-        "open":  round(float(row["open"]),  2),
-        "high":  round(float(row["high"]),  2),
-        "low":   round(float(row["low"]),   2),
-        "close": round(float(row["close"]), 2),
+        "date":   idx.strftime(fmt),
+        "open":   round(float(row["open"]),  2),
+        "high":   round(float(row["high"]),  2),
+        "low":    round(float(row["low"]),   2),
+        "close":  round(float(row["close"]), 2),
         "volume": int(row["volume"]) if "volume" in row.index else 0,
     }
 
@@ -59,7 +60,7 @@ async def get_live_price(
         df = get_stock_data(ticker.upper(), period=period, interval=interval)
         if df.empty:
             raise ValueError("No data")
-        fmt = "%Y-%m-%d %H:%M" if interval == "1h" else "%Y-%m-%d"
+        fmt      = "%Y-%m-%d %H:%M" if interval == "1h" else "%Y-%m-%d"
         last_row = df.iloc[-1]
         return _row_to_ohlcv(df.index[-1], last_row, fmt)
     except Exception:
@@ -69,10 +70,14 @@ async def get_live_price(
 @router.get("/{ticker}", response_model=ForecastResponse)
 async def get_forecast(
     ticker: str,
-    steps: int = Query(default=30, ge=1, le=168),
-    model: str = Query(default="xgboost", pattern="^(lstm|xgboost)$"),
+    steps: int    = Query(default=30, ge=1, le=168),
+    model: str    = Query(default="xgboost", pattern="^(lstm|xgboost|prophet)$"),
     interval: str = Query(default="1d", pattern="^(1d|1h)$"),
 ):
+    # Prophet не підтримує погодинний інтервал — повертаємося на xgboost
+    if model == "prophet" and interval == "1h":
+        model = "xgboost"
+
     period = INTERVAL_PERIOD.get(interval, "2y")
 
     try:
@@ -91,8 +96,10 @@ async def get_forecast(
 
     if model == "xgboost":
         result = XGBoostForecaster().predict(df, days=steps, ticker=ticker.upper())
+    elif model == "lstm":
+        result = LSTMForecaster().predict(df, days=steps, ticker=ticker.upper())
     else:
-        result = LSTMForecaster().predict(df, days=steps)
+        result = ProphetForecaster().predict(df, days=steps)
 
     predictions = [
         p for p in result["predictions"]

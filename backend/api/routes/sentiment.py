@@ -22,7 +22,7 @@ async def get_sentiment(
     except Exception:
         company_name = ticker
 
-    news = fetch_news(ticker, company_name, days_back=days)
+    news = await asyncio.to_thread(fetch_news, ticker, company_name, days_back=days)
     if not news:
         return {
             "ticker": ticker,
@@ -48,5 +48,5 @@ async def get_sentiment(
         "ticker": ticker,
         "company": company_name,
         **summary,
-        "articles": enriched[:10],
+        "articles": enriched,
     }
