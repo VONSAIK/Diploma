@@ -119,8 +119,6 @@ export default function FinancialChart({
     const el = containerRef.current
     if (!el || !width || !height) return
 
-    console.log(`[Chart] init ${width}×${height}`)
-
     const chart = createChart(el, {
       width,
       height,

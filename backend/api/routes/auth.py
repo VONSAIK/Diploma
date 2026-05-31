@@ -2,10 +2,20 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import dns.resolver
 
 from db.session import get_db
 from db.models import User
 from core.security import hash_password, verify_password, create_access_token, get_current_user
+
+
+def _domain_has_mx(email: str) -> bool:
+    domain = email.split("@")[-1]
+    try:
+        dns.resolver.resolve(domain, "MX")
+        return True
+    except Exception:
+        return False
 
 router = APIRouter()
 
@@ -35,6 +45,9 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Пароль має бути мінімум 6 символів")
+
+    if not _domain_has_mx(body.email):
+        raise HTTPException(status_code=400, detail="Домен електронної пошти не існує або не приймає листи")
 
     user = User(email=body.email, hashed_password=hash_password(body.password))
     db.add(user)

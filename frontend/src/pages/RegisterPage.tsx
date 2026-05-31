@@ -42,7 +42,7 @@ export default function RegisterPage() {
           <div className="space-y-4 text-[#333333] text-sm">
             <div className="flex items-start gap-3">
               <div className="w-1 h-1 rounded-full bg-[#444444] mt-2 flex-shrink-0" />
-              <span>ML-прогнозування цін (ARIMA, XGBoost, LSTM)</span>
+              <span>ML-прогнозування цін (XGBoost, LSTM, Prophet)</span>
             </div>
             <div className="flex items-start gap-3">
               <div className="w-1 h-1 rounded-full bg-[#444444] mt-2 flex-shrink-0" />

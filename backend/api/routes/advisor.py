@@ -1,7 +1,10 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
+
+logger = logging.getLogger(__name__)
 
 from core.config import settings
 from core.security import get_current_user, get_optional_user
@@ -60,7 +63,7 @@ async def get_recommendation(
         try:
             result = await _gemini_recommend(request)
         except Exception as e:
-            print(f"Gemini error: {e}")
+            logger.warning("Gemini error: %s", e)
             result = _rule_based_recommend(request)
     else:
         result = _rule_based_recommend(request)
