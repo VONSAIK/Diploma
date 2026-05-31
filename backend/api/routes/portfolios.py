@@ -97,5 +97,5 @@ async def delete_portfolio(
     portfolio = await db.get(Portfolio, portfolio_id)
     if not portfolio or portfolio.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Портфель не знайдено")
-    db.delete(portfolio)
+    await db.delete(portfolio)
     await db.commit()

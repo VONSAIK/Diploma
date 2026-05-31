@@ -124,7 +124,7 @@ async def delete_history_item(
     query = await db.get(AdvisorQuery, query_id)
     if not query or query.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Запис не знайдено")
-    db.delete(query)
+    await db.delete(query)
     await db.commit()
 
 

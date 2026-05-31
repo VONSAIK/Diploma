@@ -62,8 +62,10 @@ export default function PortfolioPage() {
   }
 
   const handleDelete = async (id: number) => {
-    await savedPortfoliosApi.delete(id).catch(() => {})
-    setSaved(prev => prev.filter(p => p.id !== id))
+    try {
+      await savedPortfoliosApi.delete(id)
+      setSaved(prev => prev.filter(p => p.id !== id))
+    } catch {}
   }
 
   const pieData = data
