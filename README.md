@@ -256,7 +256,6 @@ npm run dev
 | ![Новини](screenshots/sentiment.png) | FinBERT аналіз новинного сентименту |
 | ![AI Радник](screenshots/advisor.png) | Персональні рекомендації Gemini |
 
-*(додайте зображення у папку `/screenshots/`)*
 
 ---
 
